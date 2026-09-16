@@ -17,6 +17,15 @@ const roleLabels = {admin:'الإدارة',warehouse:'المخزن',pickup_capta
 const statusLabels = {new:'جديد',in_warehouse:'بالمخزن',assigned:'مع الكابتن',out_for_delivery:'بالطريق',delivered:'تم التسليم',postponed:'مؤجل',no_answer:'لا يرد',rejected:'مرفوض',returned_warehouse:'مرتجع للمخزن',returned_store:'مرتجع للمحل',cancelled:'ملغي'}
 const statusClass = s => s==='delivered'?'green':(['returned_store','returned_warehouse','rejected','cancelled'].includes(s)?'red':(['assigned','out_for_delivery'].includes(s)?'blue':(['postponed','no_answer'].includes(s)?'orange':'purple')))
 const money = v => `${Number(v||0).toFixed(2)} د.أ`
+function normalizeJordanPhone(v){
+  let p=String(v||'').trim().replace(/[\s\-()]/g,'')
+  if(p.startsWith('00962')) p='+'+p.slice(2)
+  else if(p.startsWith('962')) p='+'+p
+  else if(p.startsWith('07')) p='+962'+p.slice(1)
+  else if(p.startsWith('7')) p='+962'+p
+  return p
+}
+function validJordanPhone(v){return /^\+9627\d{8}$/.test(v)}
 const esc = v => String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))
 const qs = (s,root=document)=>root.querySelector(s)
 const qsa = (s,root=document)=>[...root.querySelectorAll(s)]
@@ -58,31 +67,68 @@ async function loadCommon(){
   }
 }
 
-function renderAuth(register=false){
+let otpPhone = ''
+let otpName = ''
+
+function renderAuth(){
   app.innerHTML=`<div class="auth-wrap"><div class="auth-card">
-    <div class="brand"><img src="/assets/logo.png" alt="Drop Off"><h1>Drop Off</h1><p>نظام إدارة التوصيل والمخزن</p></div>
-    <form id="authForm">
-      ${register?'<div class="field"><label>الاسم</label><input id="fullName" required placeholder="الاسم الكامل"></div>':''}
-      <div class="field"><label>البريد الإلكتروني</label><input id="email" type="email" required placeholder="name@example.com"></div>
-      <div class="field"><label>كلمة المرور</label><input id="password" type="password" minlength="6" required placeholder="••••••••"></div>
-      <button class="btn btn-primary full" type="submit">${register?'إنشاء الحساب':'تسجيل الدخول'}</button>
+    <div class="brand"><img src="/assets/logo.png" alt="Drop Off"><h1>Drop Off</h1><p>دخول آمن برقم الهاتف</p></div>
+    <form id="phoneForm">
+      <div class="field"><label>رقم الهاتف</label><input id="phone" inputmode="tel" autocomplete="tel" required placeholder="0791234567"></div>
+      <div class="field"><label>الاسم <span class="muted">(أول مرة فقط)</span></label><input id="fullName" autocomplete="name" placeholder="الاسم الكامل"></div>
+      <button class="btn btn-primary full" type="submit">إرسال رمز الدخول</button>
     </form>
-    <div class="auth-switch">${register?'عندك حساب؟':'أول مرة؟'} <button id="switchAuth">${register?'سجل دخول':'أنشئ حساب'}</button></div>
+    <div class="muted" style="margin-top:12px;text-align:center">سيصلك رمز من 6 أرقام على هاتفك.</div>
   </div></div>`
-  qs('#switchAuth').onclick=()=>renderAuth(!register)
-  qs('#authForm').onsubmit=async e=>{
-    e.preventDefault(); const email=qs('#email').value.trim(),password=qs('#password').value
+  qs('#phoneForm').onsubmit=async e=>{
+    e.preventDefault()
+    const phone=normalizeJordanPhone(qs('#phone').value)
+    const full_name=qs('#fullName').value.trim()
+    if(!validJordanPhone(phone)){toast('اكتب رقم أردني صحيح مثل 0791234567','error');return}
     try{
-      if(register){
-        const full_name=qs('#fullName').value.trim()
-        const {error}=await supabase.auth.signUp({email,password,options:{data:{full_name}}}); if(error) throw error
-        toast('تم إنشاء الحساب. إذا وصلك إيميل تأكيد، افتحه ثم سجل دخول.')
-        renderAuth(false)
-      }else{
-        const {error}=await supabase.auth.signInWithPassword({email,password}); if(error) throw error
-      }
+      const btn=qs('#phoneForm button[type="submit"]'); btn.disabled=true; btn.textContent='جاري إرسال الرمز...'
+      const {error}=await supabase.auth.signInWithOtp({
+        phone,
+        options:{shouldCreateUser:true,data:{full_name:full_name||phone}}
+      })
+      if(error) throw error
+      otpPhone=phone; otpName=full_name
+      toast('تم إرسال رمز الدخول')
+      renderOtp()
+    }catch(e){toast(errText(e),'error');renderAuth()}
+  }
+}
+
+function renderOtp(){
+  const masked=otpPhone ? otpPhone.replace(/(\+9627\d{2})\d{4}(\d{2})/,'$1****$2') : ''
+  app.innerHTML=`<div class="auth-wrap"><div class="auth-card">
+    <div class="brand"><img src="/assets/logo.png" alt="Drop Off"><h1>تأكيد الرقم</h1><p>أدخل رمز الـ 6 أرقام المرسل إلى ${esc(masked)}</p></div>
+    <form id="otpForm">
+      <div class="field"><label>رمز التحقق</label><input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" minlength="6" pattern="[0-9]{6}" required placeholder="••••••" style="text-align:center;font-size:28px;letter-spacing:8px"></div>
+      <button class="btn btn-primary full" type="submit">تأكيد ودخول</button>
+    </form>
+    <div class="auth-switch"><button id="resendOtp">إعادة إرسال الرمز</button> · <button id="changePhone">تغيير الرقم</button></div>
+  </div></div>`
+  qs('#otp').focus()
+  qs('#otpForm').onsubmit=async e=>{
+    e.preventDefault()
+    const token=qs('#otp').value.trim().replace(/\D/g,'')
+    if(token.length!==6){toast('الرمز لازم يكون 6 أرقام','error');return}
+    try{
+      const btn=qs('#otpForm button[type="submit"]'); btn.disabled=true; btn.textContent='جاري التحقق...'
+      const {error}=await supabase.auth.verifyOtp({phone:otpPhone,token,type:'sms'})
+      if(error) throw error
+      toast('تم التحقق بنجاح')
+    }catch(e){toast(errText(e),'error');qs('#otpForm button[type="submit"]').disabled=false;qs('#otpForm button[type="submit"]').textContent='تأكيد ودخول'}
+  }
+  qs('#resendOtp').onclick=async()=>{
+    try{
+      const {error}=await supabase.auth.signInWithOtp({phone:otpPhone,options:{shouldCreateUser:true,data:{full_name:otpName||otpPhone}}})
+      if(error) throw error
+      toast('تم إرسال رمز جديد')
     }catch(e){toast(errText(e),'error')}
   }
+  qs('#changePhone').onclick=()=>{otpPhone='';otpName='';renderAuth()}
 }
 
 function renderPending(message){
@@ -101,7 +147,7 @@ function renderShell(){
   app.innerHTML=`<div class="shell"><aside class="sidebar">
     <div class="side-brand"><img src="/assets/logo.png"><div><strong>Drop Off</strong><small>${esc(roleLabels[profile.role]||profile.role)}</small></div></div>
     <div id="nav" class="nav">${navItems().map(([id,label])=>`<button data-tab="${id}">${label}</button>`).join('')}</div>
-    <div class="side-foot"><div class="user-pill">${esc(profile.full_name||profile.email||'مستخدم')}<small>${esc(profile.email||'')}</small></div><button id="logout" class="btn btn-ghost full">تسجيل خروج</button></div>
+    <div class="side-foot"><div class="user-pill">${esc(profile.full_name||profile.phone||'مستخدم')}<small>${esc(profile.phone||'')}</small></div><button id="logout" class="btn btn-ghost full">تسجيل خروج</button></div>
   </aside><main class="main"><div class="topbar"><div><h2 id="pageTitle">Drop Off</h2><div class="muted" id="pageSub"></div></div><div class="actions"><button id="refresh" class="btn btn-ghost">↻ تحديث</button><button id="mobileLogout" class="btn btn-red mobile-only">خروج</button></div></div><section id="content"></section></main></div>`
   qsa('#nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.tab))
   qs('#logout').onclick=()=>supabase.auth.signOut(); qs('#mobileLogout').onclick=()=>supabase.auth.signOut()
@@ -196,9 +242,9 @@ function storeForm(s=null){qs('#content').innerHTML=`<div class="panel"><div cla
 
 async function renderUsers(){
   if(profile.role!=='admin'){qs('#content').innerHTML='<div class="panel"><div class="empty">للأدمن فقط.</div></div>';return}
-  await loadCommon();qs('#content').innerHTML=`<div class="panel"><h3>الحسابات المسجلة</h3><div class="table-wrap"><table class="table"><thead><tr><th>الاسم</th><th>الإيميل</th><th>الدور</th><th>إجراء</th></tr></thead><tbody>${profiles.map(p=>`<tr><td>${esc(p.full_name||'—')}</td><td>${esc(p.email||'—')}</td><td><span class="badge">${esc(roleLabels[p.role]||p.role)}</span></td><td><button class="btn btn-sm btn-blue manage-user" data-id="${p.id}">إدارة</button></td></tr>`).join('')}</tbody></table></div></div>`;qsa('.manage-user').forEach(b=>b.onclick=()=>manageUser(profiles.find(p=>p.id===b.dataset.id)))
+  await loadCommon();qs('#content').innerHTML=`<div class="panel"><h3>الحسابات المسجلة</h3><div class="table-wrap"><table class="table"><thead><tr><th>الاسم</th><th>رقم الهاتف</th><th>الدور</th><th>إجراء</th></tr></thead><tbody>${profiles.map(p=>`<tr><td>${esc(p.full_name||'—')}</td><td>${esc(p.phone||'—')}</td><td><span class="badge">${esc(roleLabels[p.role]||p.role)}</span></td><td><button class="btn btn-sm btn-blue manage-user" data-id="${p.id}">إدارة</button></td></tr>`).join('')}</tbody></table></div></div>`;qsa('.manage-user').forEach(b=>b.onclick=()=>manageUser(profiles.find(p=>p.id===b.dataset.id)))
 }
-function manageUser(u){qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>${esc(u.full_name||u.email)}</h3><button id="backUsers" class="btn btn-ghost">رجوع</button></div><div class="form-grid two"><div class="field"><label>الدور</label><select id="uRole"><option value="store_owner">صاحب محل</option><option value="delivery_captain">كابتن توصيل</option><option value="pickup_captain">كابتن جلب</option><option value="warehouse">مخزن</option><option value="admin">أدمن</option></select></div><div class="field"><label>نوع الكابتن</label><select id="uCaptain"><option value="delivery">توصيل</option><option value="pickup">جلب</option><option value="both">الاثنين</option></select></div><div class="field"><label>&nbsp;</label><button id="saveRole" class="btn btn-primary">حفظ الصلاحية</button></div><div class="field"><label>ربط بمحل</label><select id="uStore"><option value="">بدون</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div><div class="field"><label>&nbsp;</label><button id="linkStore" class="btn btn-blue">ربط الحساب بالمحل</button></div></div></div>`;qs('#uRole').value=u.role;qs('#backUsers').onclick=()=>renderUsers();qs('#saveRole').onclick=async()=>{const r=await supabase.rpc('admin_set_user_role',{p_user_id:u.id,p_role:qs('#uRole').value,p_captain_type:qs('#uCaptain').value});if(r.error)return toast(errText(r.error),'error');toast('تم تحديث الصلاحية');await loadCommon()};qs('#linkStore').onclick=async()=>{const st=qs('#uStore').value;if(!st)return toast('اختر المحل','error');const r=await supabase.rpc('admin_link_user_to_store',{p_user_id:u.id,p_store_id:st,p_is_owner:true});if(r.error)return toast(errText(r.error),'error');toast('تم ربط الحساب بالمحل')}}
+function manageUser(u){qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>${esc(u.full_name||u.phone)}</h3><button id="backUsers" class="btn btn-ghost">رجوع</button></div><div class="form-grid two"><div class="field"><label>الدور</label><select id="uRole"><option value="store_owner">صاحب محل</option><option value="delivery_captain">كابتن توصيل</option><option value="pickup_captain">كابتن جلب</option><option value="warehouse">مخزن</option><option value="admin">أدمن</option></select></div><div class="field"><label>نوع الكابتن</label><select id="uCaptain"><option value="delivery">توصيل</option><option value="pickup">جلب</option><option value="both">الاثنين</option></select></div><div class="field"><label>&nbsp;</label><button id="saveRole" class="btn btn-primary">حفظ الصلاحية</button></div><div class="field"><label>ربط بمحل</label><select id="uStore"><option value="">بدون</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div><div class="field"><label>&nbsp;</label><button id="linkStore" class="btn btn-blue">ربط الحساب بالمحل</button></div></div></div>`;qs('#uRole').value=u.role;qs('#backUsers').onclick=()=>renderUsers();qs('#saveRole').onclick=async()=>{const r=await supabase.rpc('admin_set_user_role',{p_user_id:u.id,p_role:qs('#uRole').value,p_captain_type:qs('#uCaptain').value});if(r.error)return toast(errText(r.error),'error');toast('تم تحديث الصلاحية');await loadCommon()};qs('#linkStore').onclick=async()=>{const st=qs('#uStore').value;if(!st)return toast('اختر المحل','error');const r=await supabase.rpc('admin_link_user_to_store',{p_user_id:u.id,p_store_id:st,p_is_owner:true});if(r.error)return toast(errText(r.error),'error');toast('تم ربط الحساب بالمحل')}}
 
 async function renderAccounts(){
   const [{data:sb,error:e1},{data:cb,error:e2}] = await Promise.all([supabase.from('store_balance_summary').select('*').order('store_name'),supabase.from('captain_cash_summary').select('*')]);if(e1)throw e1;if(e2)throw e2

@@ -1,28 +1,17 @@
-# Drop Off Online V1
+# Drop Off — OTP Login V1
 
-نسخة أولى متصلة بقاعدة Supabase ومجهزة كـ PWA.
+تم تحويل تسجيل الدخول إلى **رقم هاتف + رمز تحقق SMS من 6 أرقام** بدون كلمة مرور.
 
-## تشغيل محلي
-```bash
-npm install
-npm start
-```
-ثم افتح http://localhost:3000
+## طريقة الدخول
+1. المستخدم يكتب رقم أردني مثل `0791234567`.
+2. النظام يحوله تلقائياً إلى `+962791234567`.
+3. Supabase يرسل رمز SMS من 6 أرقام.
+4. المستخدم يدخل الرمز، ثم يتم تسجيل الدخول.
+5. إذا الرقم جديد، يتم إنشاء الحساب تلقائياً بصلاحية `store_owner` مبدئياً، والإدارة تغيّر الدور لاحقاً.
 
-## النشر على Railway
-- اربط المشروع بمستودع GitHub يحتوي هذه الملفات.
-- Start command: `npm start`
-- Healthcheck: `/health`
-- التطبيق يستمع تلقائياً على `PORT` من Railway.
+## المطلوب في Supabase قبل التجربة
+من لوحة Supabase:
+- Authentication → Providers → Phone: فعّل Phone.
+- اربط SMS Provider مدعوم (مثل Twilio / MessageBird / Vonage / TextLocal).
 
-## أول حساب أدمن
-1. أنشئ حساب عادي من شاشة التسجيل.
-2. بعد تأكيد البريد وتسجيل الدخول، يتم إنشاء صف في `public.profiles` تلقائياً.
-3. يتم ترقية الحساب لأول مرة إلى `admin` من قاعدة البيانات بواسطة مالك المشروع/المشرف.
-
-## بنية النظام
-- profiles / stores / store_users / captains
-- orders / order_batches / order_events
-- store_settlements / captain_handovers
-- RLS بحسب الدور
-- RPCs للكابتن والتوزيع والصلاحيات
+بدون SMS Provider لن يصل الرمز للهاتف حتى لو كانت واجهة الموقع جاهزة.
