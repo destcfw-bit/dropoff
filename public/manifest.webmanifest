@@ -1,0 +1,13 @@
+{
+  "name": "Drop Off Delivery",
+  "short_name": "Drop Off",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#071321",
+  "theme_color": "#ff7518",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {"src":"/assets/logo.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}
