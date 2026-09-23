@@ -1,17 +1,32 @@
-# Drop Off — OTP Login V1
+# Drop Off V4
 
-تم تحويل تسجيل الدخول إلى **رقم هاتف + رمز تحقق SMS من 6 أرقام** بدون كلمة مرور.
+**Source of truth:** GitHub  
+**Hosting/runtime:** DigitalOcean App Platform  
+**Database/Auth:** Supabase
 
-## طريقة الدخول
-1. المستخدم يكتب رقم أردني مثل `0791234567`.
-2. النظام يحوله تلقائياً إلى `+962791234567`.
-3. Supabase يرسل رمز SMS من 6 أرقام.
-4. المستخدم يدخل الرمز، ثم يتم تسجيل الدخول.
-5. إذا الرقم جديد، يتم إنشاء الحساب تلقائياً بصلاحية `store_owner` مبدئياً، والإدارة تغيّر الدور لاحقاً.
+## Portals
+- `/admin` — الإدارة
+- `/captain` — الكباتن
+- `/store` — المحلات
+- `/health` — health check
 
-## المطلوب في Supabase قبل التجربة
-من لوحة Supabase:
-- Authentication → Providers → Phone: فعّل Phone.
-- اربط SMS Provider مدعوم (مثل Twilio / MessageBird / Vonage / TextLocal).
+## V4 — Preprinted sticker workflow
+- الإدارة تنشئ رول استكرات مسبقة.
+- كل استكر له رقم ثابت مثل `DO-ST-100001` وQR فريد.
+- يمكن تخصيص الرول لمحل معين.
+- صاحب المحل يلصق الاستكر على الطلب ثم يسجل بيانات الزبون ويربط الاستكر بالأوردر.
+- الاستكر لا يقبل الاستخدام أكثر من مرة.
+- الإدارة تستطيع طباعة الرول مباشرة من لوحة الاستكرات.
+- QR لا يعتمد على الدومين؛ هذا يسهّل استخدام نفس الاستكر مستقبلًا داخل تطبيق iPhone/Android.
 
-بدون SMS Provider لن يصل الرمز للهاتف حتى لو كانت واجهة الموقع جاهزة.
+## DigitalOcean
+`.do/app.yaml` مربوط على:
+- Repo: `destcfw-bit/dropoff`
+- Branch: `main`
+- Auto deploy: enabled
+- Dockerfile: `Dockerfile`
+- Health & liveness: `/health`
+- Region: Frankfurt (`fra`)
+- Instance starter: `apps-s-1vcpu-1gb`
+
+كل Push على `main` يعمل Deploy تلقائي.

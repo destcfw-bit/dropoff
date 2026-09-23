@@ -1,7 +1,10 @@
 {
-  "name": "dropoff-online-v1",
-  "version": "1.0.0",
+  "name": "dropoff",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
-  "scripts": {"start":"node server.js"}
+  "packageManager": "npm@11.19.0",
+  "scripts": {
+    "start": "node server.js"
+  }
 }
