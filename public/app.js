@@ -4,6 +4,8 @@ import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.js'
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY,{
   auth:{
+    // Each portal owns its persisted session and cross-tab auth channel.
+    storageKey:`dropoff-${new URL(SUPABASE_URL).hostname}-${portal()}-auth`,
     persistSession:true,
     autoRefreshToken:true,
     detectSessionInUrl:false,
@@ -87,19 +89,23 @@ async function init(){
   if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{})
   const {data:{session:s}}=await supabase.auth.getSession()
   session=s
-  supabase.auth.onAuthStateChange((_event,s2)=>{session=s2;boot()})
+  supabase.auth.onAuthStateChange((_event,s2)=>{
+    session=s2
+    // Run Supabase calls after the auth callback releases its session lock.
+    setTimeout(()=>boot().catch(e=>toast(errText(e),'error')),0)
+  })
   await boot()
 }
 
 async function boot(){
   if(!session){profile=null;renderAuth();return}
   const {data,error}=await supabase.from('profiles').select('*').eq('id',session.user.id).single()
-  if(error || !data){await supabase.auth.signOut();renderAuth();return}
+  if(error || !data){await supabase.auth.signOut({scope:'local'});renderAuth();return}
   profile=data
-  if(!profile.active){await supabase.auth.signOut();toast('هذا الحساب موقوف','error');renderAuth();return}
+  if(!profile.active){await supabase.auth.signOut({scope:'local'});toast('هذا الحساب موقوف','error');renderAuth();return}
   const p=portal()
   if(!portalMeta[p].roles.includes(profile.role)){
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({scope:'local'})
     app.innerHTML=`<div class="auth-wrap"><div class="auth-card"><div class="brand"><div class="logo-shell"><img src="/assets/logo-transparent.png"></div><h1>Drop Off</h1></div><p style="text-align:center">هذا الحساب لا يملك صلاحية الدخول إلى ${portalMeta[p].title}.</p><button id="backLogin" class="btn btn-primary full">رجوع</button></div></div>`
     qs('#backLogin').onclick=renderAuth
     return
@@ -189,7 +195,7 @@ function renderShell(){
     <section id="content"></section>
   </main></div>`
   qsa('#nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.tab))
-  qs('#logout').onclick=()=>supabase.auth.signOut()
+  qs('#logout').onclick=()=>supabase.auth.signOut({scope:'local'})
   qs('#refresh').onclick=()=>openTab(currentTab,true)
 }
 async function openTab(tab,force=false){
