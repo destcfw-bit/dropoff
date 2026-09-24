@@ -179,7 +179,7 @@ function defaultTab(){
 }
 function navItems(){
   if(profile.role==='admin')return [
-    ['home','⌂ الرئيسية'],['stickers','🏷️ الاستكرات'],['add','＋ إضافة أوردرات'],['orders','▦ الأوردرات'],
+    ['home','⌂ الرئيسية'],['stickers','🏷️ طباعة الملصقات'],['add','＋ إضافة أوردرات'],['orders','▦ الأوردرات'],
     ['assign','⇄ التوزيع'],['operations','📦 العمليات'],['stores','🏪 المحلات'],['users','👥 الحسابات'],['accounts','💰 المالية']
   ]
   if(profile.role==='store_owner')return [['store_new','＋ إضافة أوردر'],['owner','▦ طلباتي وحسابي']]
@@ -204,7 +204,7 @@ function renderShell(){
 async function openTab(tab,force=false){
   currentTab=tab
   qsa('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab))
-  const titles={home:'لوحة الإدارة',stickers:'إدارة الاستكرات',store_new:'إضافة أوردر',add:'إضافة أوردرات',orders:'إدارة الأوردرات',assign:'توزيع الأوردرات',operations:'العمليات اليومية',stores:'المحلات',users:'الحسابات والصلاحيات',accounts:'الحسابات والتسويات',captain:'أوردرات الكابتن',owner:'حساب المحل'}
+  const titles={home:'لوحة الإدارة',stickers:'طباعة ملصقات الطلبات',store_new:'إضافة أوردر',add:'إضافة أوردرات',orders:'إدارة الأوردرات',assign:'توزيع الأوردرات',operations:'العمليات اليومية',stores:'المحلات',users:'الحسابات والصلاحيات',accounts:'الحسابات والتسويات',captain:'أوردرات الكابتن',owner:'حساب المحل'}
   qs('#pageTitle').textContent=titles[tab]||'Drop Off'
   qs('#pageSub').textContent=new Date().toLocaleString('ar-JO')
   try{
@@ -274,172 +274,83 @@ function orderTable(rows,actions=false){
   </tr></thead><tbody>${rows.map(o=>`<tr>
     <td><b>${esc(o.order_code)}</b>${o.priority==='urgent'?' <span class="badge red">مستعجل</span>':''}<small style="display:block">${o.parcel_count||1} قطعة · ${o.payment_type==='prepaid'?'مدفوع':'تحصيل'}${o.shelf_location?' · رف '+esc(o.shelf_location):''}</small></td><td>${esc(storeName(o.store_id))}</td><td>${esc(o.customer_name)}</td><td>${esc(o.customer_phone)}</td><td>${esc(o.area)}</td><td>${money(o.amount_to_collect)}</td>
     <td><span class="badge ${statusClass(o.status)}">${esc(statusLabels[o.status]||o.status)}</span></td><td>${esc(captainName(o.delivery_captain_id))}</td>
-    ${actions?`<td><button class="btn btn-sm btn-blue qr-btn" data-id="${o.id}">QR</button> <button class="btn btn-sm btn-ghost edit-order" data-id="${o.id}">تفاصيل</button></td>`:''}
+    ${actions===true?`<td><button class="btn btn-sm btn-blue qr-btn" data-id="${o.id}">طباعة QR</button> <button class="btn btn-sm btn-ghost edit-order" data-id="${o.id}">تفاصيل</button></td>`:actions==='store'?`<td><button class="btn btn-sm btn-ghost store-detail" data-id="${o.id}">تفاصيل وQR</button></td>`:''}
   </tr>`).join('')}</tbody></table></div>`
 }
 
 
 async function renderStickers(){
   await loadCommon()
-  const {data:rolls,error}=await supabase.from('sticker_rolls').select('*').order('created_at',{ascending:false}).limit(200)
+  const {data,error}=await supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(500)
   if(error)throw error
-
-  qs('#content').innerHTML=`
-    <div class="panel">
-      <div class="panel-head">
-        <div><h3>رولات الاستكرات الجاهزة</h3><span class="muted">QR ثابت + رقم ظاهر لكل أوردر قبل إنشاء الطلب</span></div>
-      </div>
-      <form id="rollForm" class="form-grid">
-        <div class="field"><label>المحل</label><select id="rollStore"><option value="">بدون تعيين الآن</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
-        <div class="field"><label>عدد الاستكرات</label><input id="rollQty" type="number" min="1" max="5000" value="100" required></div>
-        <div class="field"><label>ملاحظة</label><input id="rollNote" placeholder="مثال: رول محل الورد - دفعة 1"></div>
-        <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">＋ إنشاء رول</button></div>
-      </form>
-      <div id="rollResult"></div>
-    </div>
-
-    <div class="panel" style="margin-top:14px">
-      <div class="panel-head"><h3>الرولات</h3><span class="muted">${rolls?.length||0} رول</span></div>
-      <div class="table-wrap"><table class="table">
-        <thead><tr><th>الرول</th><th>المحل</th><th>العدد</th><th>من</th><th>إلى</th><th>الحالة</th><th>إجراء</th></tr></thead>
-        <tbody>${(rolls||[]).map(r=>`<tr>
-          <td><b>${esc(r.roll_code)}</b></td>
-          <td>${esc(storeName(r.store_id))}</td>
-          <td>${r.quantity}</td>
-          <td>${r.start_serial?`DO-ST-${String(r.start_serial).padStart(6,'0')}`:'—'}</td>
-          <td>${r.end_serial?`DO-ST-${String(r.end_serial).padStart(6,'0')}`:'—'}</td>
-          <td><span class="badge ${r.status==='assigned'?'green':'purple'}">${esc(r.status)}</span></td>
-          <td><button class="btn btn-sm btn-blue print-roll" data-id="${r.id}">طباعة الاستكرات</button></td>
-        </tr>`).join('')||'<tr><td colspan="7">لا يوجد رولات بعد</td></tr>'}</tbody>
-      </table></div>
+  const orders=data||[]
+  qs('#content').innerHTML=`<div class="welcome-card"><div><span class="eyebrow">DROP OFF LABELS</span><h3>ملصقات الطلبات 📦</h3><p>المحل يسجل البيانات؛ هنا اطبع رقم الطلب وQR والتفاصيل، ثم الصق الملصق على الكيس.</p></div></div>
+    <div class="panel"><div class="panel-head"><h3>الطلبات الأخيرة</h3><span class="muted">آخر 500 طلب · يمكن إعادة طباعة أي ملصق</span></div>
+      <div class="toolbar" style="margin-bottom:12px"><select id="labelStore"><option value="">كل المحلات</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><input id="labelSearch" placeholder="ابحث برقم الطلب أو اسم الزبون أو الهاتف"><button id="printSelected" class="btn btn-primary">طباعة المحدد</button></div>
+      <div id="labelOrders"></div>
     </div>`
-
-  qs('#rollForm').onsubmit=async e=>{
-    e.preventDefault()
-    const b=qs('#rollForm button')
-    try{
-      b.disabled=true;b.textContent='جاري الإنشاء...'
-      const {data,error}=await supabase.rpc('admin_create_sticker_roll',{
-        p_store_id:qs('#rollStore').value||null,
-        p_quantity:Number(qs('#rollQty').value||0),
-        p_note:qs('#rollNote').value.trim()||null
-      })
-      if(error)throw error
-      const r=Array.isArray(data)?data[0]:data
-      qs('#rollResult').innerHTML=`<div class="created-account">✓ تم إنشاء ${r?.sticker_count||0} استكر <strong>${esc(r?.first_sticker||'')} → ${esc(r?.last_sticker||'')}</strong><small>اطبع الرول والصقه على الأوردرات قبل استلامها.</small></div>`
-      toast('تم إنشاء الرول')
-    }catch(x){toast(errText(x),'error')}
-    finally{b.disabled=false;b.textContent='＋ إنشاء رول'}
+  const draw=()=>{
+    const storeId=qs('#labelStore').value,search=qs('#labelSearch').value.trim().toLowerCase()
+    const shown=orders.filter(o=>(!storeId||o.store_id===storeId)&&(!search||[o.order_code,o.customer_name,o.customer_phone].some(v=>String(v||'').toLowerCase().includes(search))))
+    qs('#labelOrders').innerHTML=`<div class="table-wrap"><table class="table"><thead><tr><th>تحديد</th><th>رقم الطلب</th><th>المحل</th><th>الزبون</th><th>المنطقة</th><th>الحالة</th><th>طباعة</th></tr></thead><tbody>${shown.map(o=>`<tr><td><input type="checkbox" class="check label-check" value="${o.id}" aria-label="تحديد ${esc(o.order_code)}"></td><td><strong>${esc(o.order_code)}</strong></td><td>${esc(storeName(o.store_id))}</td><td>${esc(o.customer_name)}</td><td>${esc(o.area)}</td><td>${esc(statusLabels[o.status]||o.status)}</td><td><button class="btn btn-sm btn-blue label-print" data-id="${o.id}">طباعة الملصق</button></td></tr>`).join('')||'<tr><td colspan="7">لا توجد طلبات مطابقة</td></tr>'}</tbody></table></div>`
+    qsa('.label-print').forEach(b=>b.onclick=()=>printQr(orders.find(o=>o.id===b.dataset.id)))
   }
-
-  qsa('.print-roll').forEach(b=>b.onclick=()=>printStickerRoll(b.dataset.id))
-}
-
-async function printStickerRoll(rollId){
-  const {data,error}=await supabase.from('order_stickers')
-    .select('sticker_code,qr_token,store_id')
-    .eq('roll_id',rollId)
-    .order('serial_no',{ascending:true})
-  if(error)return toast(errText(error),'error')
-  if(!data?.length)return toast('لا يوجد استكرات في هذا الرول','error')
-
-  const labels=[]
-  for(const s of data){
-    const qr=await QRCode.toDataURL(`DROP-OFF:${s.qr_token}`,{width:220,margin:1,errorCorrectionLevel:'M'})
-    labels.push(`<div class="label">
-      <div class="brandRow"><img src="${location.origin}/assets/logo-transparent.png"><div><strong>DROP OFF</strong><small>DELIVERY SERVICES</small></div></div>
-      <div class="stickerNo">${esc(s.sticker_code)}</div>
-      <img class="qr" src="${qr}">
-      <div class="line"><span>الاسم</span></div>
-      <div class="line"><span>الهاتف</span></div>
-      <div class="line"><span>المنطقة</span></div>
-    </div>`)
+  qs('#labelStore').onchange=draw
+  qs('#labelSearch').oninput=draw
+  qs('#printSelected').onclick=()=>{
+    const ids=new Set(qsa('.label-check:checked').map(x=>x.value))
+    const selected=orders.filter(o=>ids.has(o.id))
+    if(!selected.length)return toast('حدد طلباً واحداً على الأقل','error')
+    printQrBatch(selected)
   }
-
-  const w=window.open('','_blank','width=1000,height=800')
-  if(!w)return toast('اسمح بفتح النوافذ للطباعة','error')
-  w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>Drop Off Stickers</title>
-  <style>
-    @page{size:A4;margin:7mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#111}
-    .sheet{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm}
-    .label{break-inside:avoid;border:1.4px solid #111;border-radius:10px;padding:8px;text-align:center;min-height:83mm}
-    .brandRow{display:flex;align-items:center;justify-content:center;gap:7px}.brandRow img{width:32px;height:32px;object-fit:contain}.brandRow strong{display:block;font-size:15px}.brandRow small{font-size:8px}
-    .stickerNo{font-size:17px;font-weight:900;margin:5px 0}.qr{width:42mm;height:42mm;object-fit:contain}
-    .line{height:9mm;border-bottom:1px solid #777;text-align:right;font-size:9px;padding-top:4mm}.line span{background:#fff;padding-left:4px;color:#555}
-    @media print{button{display:none}}
-  </style></head><body><div class="sheet">${labels.join('')}</div></body></html>`)
-  w.document.close()
-  setTimeout(()=>w.print(),700)
+  draw()
 }
 
 async function renderStoreNew(){
-  const {data:links,error:lerr}=await supabase.from('store_users').select('store_id,stores(id,name)').eq('user_id',profile.id)
-  if(lerr)throw lerr
-  if(!links?.length){qs('#content').innerHTML='<div class="panel"><div class="empty">حسابك غير مربوط بمحل.</div></div>';return}
-  const storeIds=links.map(x=>x.store_id)
-  const {data:stickers,error:serr}=await supabase.from('order_stickers')
-    .select('sticker_code,store_id,status')
-    .in('store_id',storeIds)
-    .eq('status','available')
-    .order('serial_no',{ascending:true})
-    .limit(20)
-  if(serr)throw serr
+  const {data:links,error}=await supabase.from('store_users').select('store_id,stores(id,name,active)').eq('user_id',profile.id)
+  if(error)throw error
+  const owned=(links||[]).map(x=>x.stores).filter(s=>s?.active)
+  if(!owned.length){qs('#content').innerHTML='<div class="panel"><div class="empty">حسابك غير مربوط بمحل نشط.</div></div>';return}
 
-  qs('#content').innerHTML=`
-    <div class="welcome-card">
-      <div><span class="eyebrow">PRE-PRINTED QR FLOW</span><h3>إضافة أوردر جديد 📦</h3><p>الصق الاستكر المطبوع على الطلب، ثم اكتب أو امسح رقمه وسجّل بيانات الزبون.</p></div>
-      <div class="badge green">${stickers?.length||0}+ استكر جاهز</div>
-    </div>
-    <div class="panel">
-      <form id="storeOrderForm" class="form-grid two">
-        <div class="field"><label>رقم الاستكر</label><input id="soSticker" required placeholder="DO-ST-100001" autocomplete="off"></div>
-        <div class="field"><label>اسم الزبون</label><input id="soName" required></div>
-        <div class="field"><label>رقم الهاتف</label><input id="soPhone" required inputmode="tel"></div>
-        <div class="field"><label>المنطقة</label><input id="soArea" required></div>
-        <div class="field"><label>العنوان</label><input id="soAddress" required></div>
-        <div class="field"><label>المبلغ المطلوب تحصيله</label><input id="soAmount" type="number" step=".01" min="0" value="0"></div>
-        <div class="field"><label>الدفع</label><select id="soPayment"><option value="cod">عند التسليم</option><option value="prepaid">مدفوع مسبقاً</option></select></div>
-        <div class="field"><label>عدد القطع</label><input id="soParcels" type="number" min="1" max="100" value="1"></div>
-        <div class="field"><label>الأولوية</label><select id="soPriority"><option value="normal">عادي</option><option value="urgent">مستعجل</option></select></div>
-        <div class="field"><label>ملاحظات</label><textarea id="soNotes" placeholder="تفاصيل إضافية"></textarea></div>
-        <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">✓ تسجيل الأوردر وربط الاستكر</button></div>
-      </form>
-      <div id="storeOrderResult"></div>
-    </div>
-    <div class="panel" style="margin-top:14px">
-      <div class="panel-head"><h3>أول استكرات جاهزة عندك</h3><span class="muted">استخدم كل استكر مرة واحدة فقط</span></div>
-      <div class="cards">${(stickers||[]).map(s=>`<div class="card"><h4>${esc(s.sticker_code)}</h4><p>${esc(stores.find(x=>x.id===s.store_id)?.name||'محل')}</p></div>`).join('')||'<div class="empty">لا يوجد استكرات متاحة. تواصل مع الإدارة لاستلام رول جديد.</div>'}</div>
-    </div>`
-
+  qs('#content').innerHTML=`<div class="welcome-card"><div><span class="eyebrow">طلب جديد</span><h3>إضافة أوردر 📦</h3><p>أدخل بيانات الزبون، والنظام يولد رقم الطلب وQR تلقائياً. الإدارة تطبع الملصق وتضعه على الكيس.</p></div></div>
+    <div class="panel"><form id="storeOrderForm" class="form-grid two">
+      <div class="field"><label for="soStore">المحل</label><select id="soStore" required>${owned.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="field"><label for="soName">اسم الزبون</label><input id="soName" required maxlength="150"></div>
+      <div class="field"><label for="soPhone">رقم الهاتف</label><input id="soPhone" required inputmode="tel" maxlength="40"></div>
+      <div class="field"><label for="soArea">المنطقة</label><input id="soArea" required maxlength="150"></div>
+      <div class="field"><label for="soAddress">العنوان</label><input id="soAddress" required maxlength="500"></div>
+      <div class="field"><label for="soAmount">المبلغ المطلوب تحصيله</label><input id="soAmount" type="number" step=".01" min="0" max="100000" value="0" required></div>
+      <div class="field"><label for="soPayment">الدفع</label><select id="soPayment"><option value="cod">عند التسليم</option><option value="prepaid">مدفوع مسبقاً</option></select></div>
+      <div class="field"><label for="soParcels">عدد القطع</label><input id="soParcels" type="number" min="1" max="100" value="1" required></div>
+      <div class="field"><label for="soPriority">الأولوية</label><select id="soPriority"><option value="normal">عادي</option><option value="urgent">مستعجل</option></select></div>
+      <div class="field"><label for="soNotes">ملاحظات</label><textarea id="soNotes" maxlength="2000" placeholder="تفاصيل إضافية"></textarea></div>
+      <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">✓ إنشاء الطلب والـQR</button></div>
+    </form><div id="storeOrderResult" role="status" aria-live="polite"></div></div>`
+  qs('#soPayment').onchange=()=>{const prepaid=qs('#soPayment').value==='prepaid';qs('#soAmount').disabled=prepaid;if(prepaid)qs('#soAmount').value='0'}
   qs('#storeOrderForm').onsubmit=async e=>{
     e.preventDefault()
-    const b=qs('#storeOrderForm button')
+    const b=qs('#storeOrderForm button[type="submit"]')
     try{
-      b.disabled=true;b.textContent='جاري الحفظ...'
-      const {data,error}=await supabase.rpc('store_create_order_with_sticker',{
-        p_sticker_code:qs('#soSticker').value.trim().toUpperCase(),
-        p_customer_name:qs('#soName').value.trim(),
-        p_customer_phone:qs('#soPhone').value.trim(),
-        p_area:qs('#soArea').value.trim(),
-        p_address:qs('#soAddress').value.trim(),
-        p_amount_to_collect:qs('#soPayment').value==='prepaid'?0:Number(qs('#soAmount').value||0),
+      b.disabled=true;b.textContent='جاري إنشاء الطلب...'
+      const {data:order,error:saveError}=await supabase.rpc('store_create_order_auto',{
+        p_store_id:qs('#soStore').value,
+        p_customer_name:qs('#soName').value.trim(),p_customer_phone:qs('#soPhone').value.trim(),
+        p_area:qs('#soArea').value.trim(),p_address:qs('#soAddress').value.trim(),
+        p_amount_to_collect:Number(qs('#soAmount').value||0),p_payment_type:qs('#soPayment').value,
+        p_parcel_count:Number(qs('#soParcels').value),p_priority:qs('#soPriority').value,
         p_notes:qs('#soNotes').value.trim()||null
       })
-      if(error)throw error
-      const order=Array.isArray(data)?data[0]:data
-      const extras={payment_type:qs('#soPayment').value,parcel_count:Number(qs('#soParcels').value),priority:qs('#soPriority').value}
-      const updated=await supabase.rpc('store_set_order_options',{p_order_id:order.id,p_payment_type:extras.payment_type,p_parcel_count:extras.parcel_count,p_priority:extras.priority})
-      if(updated.error)throw updated.error
-      qs('#storeOrderResult').innerHTML=`<div class="created-account">✓ تم تسجيل الأوردر <strong>${esc(order?.order_code||'')}</strong><small>الاستكر صار مربوط بهذا الأوردر ولن يقبل الاستخدام مرة ثانية.</small></div>`
-      toast('تمت إضافة الأوردر')
-      qs('#storeOrderForm').reset()
-    }catch(x){
-      const map={sticker_not_found:'رقم الاستكر غير موجود',sticker_already_used:'هذا الاستكر مستخدم مسبقًا',sticker_not_assigned_to_your_store:'هذا الاستكر غير مخصص لمحلك'}
-      toast(map[x?.message]||errText(x),'error')
-    }finally{b.disabled=false;b.textContent='✓ تسجيل الأوردر وربط الاستكر'}
+      if(saveError)throw saveError
+      const o=Array.isArray(order)?order[0]:order
+      const qr=await QRCode.toDataURL(o.order_code,{width:180,margin:1})
+      qs('#storeOrderResult').innerHTML=`<div class="created-order"><div><span class="badge green">✓ تم إنشاء الطلب</span><h3>${esc(o.order_code)}</h3><p>${esc(o.customer_name)} · ${esc(o.customer_phone)}</p><p>${esc(o.area)} · ${esc(o.address)}</p><p>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)} · ${o.parcel_count} قطعة</p><small>الإدارة تستطيع طباعة ملصق هذا الطلب من شاشة «طباعة الملصقات».</small></div><img src="${qr}" alt="QR للطلب ${esc(o.order_code)}"></div>`
+      toast(`تم إنشاء ${o.order_code}`)
+      const chosen=qs('#soStore').value
+      qs('#storeOrderForm').reset();qs('#soStore').value=chosen;qs('#soAmount').disabled=false
+    }catch(x){toast(({STORE_NOT_AVAILABLE:'المحل غير متاح',INVALID_ORDER_DETAILS:'أكمل بيانات الطلب بشكل صحيح',INVALID_ORDER_OPTIONS:'تحقق من المبلغ وعدد القطع',STORE_ACCOUNT_REQUIRED:'هذا الحساب غير مخوّل لإنشاء الطلبات'})[x?.message]||errText(x),'error')}
+    finally{b.disabled=false;b.textContent='✓ إنشاء الطلب والـQR'}
   }
 }
-
 
 function renderAdd(){
   if(!stores.length){qs('#content').innerHTML='<div class="panel"><div class="empty">أضف محل أولاً.</div></div>';return}
@@ -538,17 +449,19 @@ async function printQrBatch(orders){
   if(!w)return toast('اسمح بفتح النوافذ للطباعة','error')
   const labels=await Promise.all(orders.map(async o=>{
     const qr=await QRCode.toDataURL(o.order_code,{width:220,margin:1})
-    return `<div class="label"><b>DROP OFF · ${esc(o.order_code)}</b><img src="${qr}"><b>${esc(storeName(o.store_id))}</b><span>${esc(o.customer_name)} · ${esc(o.customer_phone)}</span><span>${esc(o.area)} · ${o.parcel_count||1} قطعة</span><b>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</b></div>`
+    return `<div class="label"><b>DROP OFF · ${esc(o.order_code)}</b><img src="${qr}"><b>${esc(storeName(o.store_id))}</b><span>${esc(o.customer_name)} · ${esc(o.customer_phone)}</span><span>${esc(o.area)} · ${esc(o.address)}</span><span>${o.parcel_count||1} قطعة · ${o.priority==='urgent'?'مستعجل':'عادي'}</span><b>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</b></div>`
   }))
   w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>ملصقات Drop Off</title><style>@page{size:A4;margin:8mm}body{font-family:Arial}.sheet{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm}.label{border:1px solid #333;border-radius:8px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:5px;break-inside:avoid;font-size:11px}.label img{width:35mm;height:35mm}.label b{font-size:13px}</style></head><body><div class="sheet">${labels.join('')}</div></body></html>`)
   w.document.close();setTimeout(()=>w.print(),700)
 }
 
 async function printQr(o){
+  if(!o)return
+  const w=window.open('','_blank','width=450,height=650')
+  if(!w)return toast('اسمح بفتح النوافذ للطباعة','error')
   const payload=o.order_code
   const dataUrl=await QRCode.toDataURL(payload,{width:300,margin:1,errorCorrectionLevel:'M'})
-  const w=window.open('','_blank','width=450,height=650')
-  w.document.write(`<html dir="rtl"><head><title>${esc(o.order_code)}</title><style>body{font-family:Arial;display:grid;place-items:center;padding:20px}.label{width:320px;border:1px solid #222;border-radius:14px;padding:16px;text-align:center}.label img{width:220px}.brand{font-size:26px;font-weight:900}.price{font-size:22px;font-weight:900}</style></head><body><div class="label"><div class="brand">DROP OFF</div><div>${esc(o.order_code)}</div><img src="${dataUrl}"><h3>${esc(storeName(o.store_id))}</h3><div>${esc(o.customer_name)} · ${esc(o.customer_phone)}</div><div>${esc(o.area)} — ${esc(o.address)}</div><div>${esc(o.parcel_count||1)} قطعة · ${o.payment_type==='prepaid'?'مدفوع':'تحصيل'}</div><div class="price">${money(o.amount_to_collect)}</div></div></body></html>`)
+  w.document.write(`<html dir="rtl"><head><meta charset="utf-8"><title>${esc(o.order_code)}</title><style>@page{size:100mm 100mm;margin:4mm}body{margin:0;font-family:Arial;display:grid;place-items:center;padding:4mm;color:#111}.label{width:88mm;border:1px solid #222;border-radius:10px;padding:8px;text-align:center;box-sizing:border-box}.label img{width:36mm;height:36mm;object-fit:contain}.brand{font-size:19px;font-weight:900}.price{font-size:17px;font-weight:900}.details{font-size:12px;line-height:1.5;overflow-wrap:anywhere}</style></head><body><div class="label"><div class="brand">DROP OFF</div><strong>${esc(o.order_code)}</strong><br><img src="${dataUrl}" alt="QR"><h3>${esc(storeName(o.store_id))}</h3><div class="details">${esc(o.customer_name)} · ${esc(o.customer_phone)}<br>${esc(o.area)} — ${esc(o.address)}<br>${esc(o.parcel_count||1)} قطعة · ${o.priority==='urgent'?'مستعجل · ':''}${o.payment_type==='prepaid'?'مدفوع':'تحصيل'}${o.notes?`<br>${esc(o.notes)}`:''}</div><div class="price">${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</div></div></body></html>`)
   w.document.close()
   setTimeout(()=>w.print(),400)
 }
@@ -953,12 +866,19 @@ async function renderOwner(){
   const ownedStores=links.map(x=>x.stores).filter(Boolean)
   qs('#content').innerHTML=`<div class="welcome-card"><div><span class="eyebrow">متاجري</span><h3>${ownedStores.map(s=>esc(s.name)).join(' · ')}</h3><div class="category-list">${categoryBadges([...new Set(ownedStores.flatMap(s=>s.categories||[]))])}</div></div></div><div class="owner-summary">${stat('إجمالي الأوردرات',orders.length)}${stat('تم التسليم',orders.filter(o=>o.status==='delivered').length)}${stat('مرتجع',orders.filter(o=>o.status==='returned_store'||o.status==='returned_warehouse').length)}<div class="stat"><span>المبلغ المستحق</span><b>${money(balance)}</b></div></div>
   <div class="finance-strip"><span>التحصيلات</span><strong>${money(collections)}</strong><span>الرسوم ${money(fees)}</span></div>
-  <div class="panel"><div class="panel-head"><h3>أوردرات المحل</h3></div>${orderTable(orders)}</div>`
+  <div class="panel"><div class="panel-head"><h3>أوردرات المحل</h3></div>${orderTable(orders,'store')}<div id="storeOrderDetails"></div></div>`
   // Store owners can download only their own visible orders.
   const panel=qs('#content .panel')
   const button=document.createElement('button');button.className='btn btn-blue';button.textContent='تنزيل كشف طلباتي CSV'
   button.onclick=()=>downloadOrdersCsv(orders,`dropoff-store-${new Date().toISOString().slice(0,10)}.csv`)
   panel.querySelector('.panel-head').append(button)
+  qsa('.store-detail').forEach(b=>b.onclick=async()=>{
+    const o=orders.find(x=>x.id===b.dataset.id)
+    if(!o)return
+    const qr=await QRCode.toDataURL(o.order_code,{width:180,margin:1})
+    qs('#storeOrderDetails').innerHTML=`<div class="created-order"><div><span class="badge ${statusClass(o.status)}">${esc(statusLabels[o.status]||o.status)}</span><h3>${esc(o.order_code)} · ${esc(storeName(o.store_id))}</h3><p>${esc(o.customer_name)} · ${esc(o.customer_phone)}</p><p>${esc(o.area)} · ${esc(o.address)}</p><p>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)} · ${esc(o.parcel_count||1)} قطعة</p><p>${esc(o.notes||'')}</p></div><img src="${qr}" alt="QR للطلب ${esc(o.order_code)}"></div>`
+    qs('#storeOrderDetails').scrollIntoView({behavior:'smooth',block:'nearest'})
+  })
 }
 
 init().catch(e=>{
