@@ -467,31 +467,84 @@ async function saveBatch(){
   qs('#printAllQr').onclick=()=>printQrBatch(data)
 }
 
+const labelPrintCss=`
+  *{box-sizing:border-box}
+  body{margin:0;color:#0b2c4c;font-family:Tahoma,Arial,sans-serif;background:#fff}
+  .sheet{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4mm}
+  .label{position:relative;break-inside:avoid;page-break-inside:avoid;overflow:hidden;border:1.5px solid #0b2c4c;border-radius:9px;background:#fff;padding:3mm;display:flex;flex-direction:column;gap:1.5mm;min-width:0;overflow-wrap:anywhere}
+  .label:before{content:"";position:absolute;top:0;right:0;left:0;height:2mm;background:#f36f00}
+  .label-head{display:flex;align-items:center;justify-content:center;border-bottom:1px solid #dce5ee;padding:2mm 0 1mm}
+  .label-head img{display:block;width:38mm;height:17mm;object-fit:contain}
+  .label-code{text-align:center;font-size:17px;line-height:1.25;font-weight:900;letter-spacing:.3px;direction:ltr;white-space:nowrap}
+  .label-qr{align-self:center;padding:1mm;border:2px solid #0b2c4c;border-radius:7px;background:#fff;line-height:0}
+  .label-qr img{display:block;width:28mm;height:28mm;image-rendering:pixelated}
+  .label-hint{text-align:center;font-size:8px;color:#496078}
+  .label-info{border-top:1px solid #dce5ee;padding-top:1mm;font-size:10px;line-height:1.45}
+  .label-info div{display:flex;gap:2mm;margin:1mm 0}
+  .label-info strong{color:#0b2c4c;min-width:10mm;flex:none}
+  .label-info span{color:#283e54;min-width:0}
+  .label-note{font-size:9px;color:#496078;max-height:8mm;overflow:hidden}
+  .label-foot{margin-top:auto;border-top:1px solid #dce5ee;padding-top:1.5mm;display:flex;align-items:center;justify-content:space-between;gap:2mm;font-size:10px;font-weight:800}
+  .label-foot b{color:#a84700;font-size:12px}
+  .sheet .label{min-height:88mm}
+  .sheet .label-note{display:none}
+  .single{display:grid;place-items:center;min-height:92mm}
+  .single .label{width:90mm;min-height:90mm;padding:4mm;gap:1.5mm}
+  .single .label-head img{width:50mm;height:21mm}
+  .single .label-code{font-size:21px}
+  .single .label-qr img{width:32mm;height:32mm}
+  .single .label-info{font-size:11px}
+  .single .label-foot{font-size:12px}
+  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+`
+function qrLabel(o,qr){
+  return `<div class="label">
+    <div class="label-head"><img src="${location.origin}/assets/logo-transparent.png" alt="Drop Off"></div>
+    <div class="label-code">${esc(o.order_code)}</div>
+    <div class="label-qr"><img src="${qr}" alt="QR ${esc(o.order_code)}"></div>
+    <div class="label-hint">امسح الكود لإدارة الطلب · DROP OFF</div>
+    <div class="label-info">
+      <div><strong>المحل</strong><span>${esc(storeName(o.store_id))}</span></div>
+      <div><strong>الزبون</strong><span>${esc(o.customer_name)} · ${esc(o.customer_phone)}</span></div>
+      <div><strong>العنوان</strong><span>${esc(o.area)} — ${esc(o.address)}</span></div>
+    </div>
+    ${o.notes?`<div class="label-note">${esc(o.notes)}</div>`:''}
+    <div class="label-foot"><span>${esc(o.parcel_count||1)} قطعة${o.priority==='urgent'?' · مستعجل':''}</span><b>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</b></div>
+  </div>`
+}
+async function printWhenReady(w){
+  const images=[...w.document.images]
+  await Promise.race([
+    Promise.all(images.map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.onload=resolve;img.onerror=resolve}))),
+    new Promise(resolve=>setTimeout(resolve,4000))
+  ])
+  if(!w.closed)setTimeout(()=>w.print(),250)
+}
 async function printQrBatch(orders,printWindow=null){
   const w=printWindow||window.open('','_blank','width=1000,height=800')
   if(!w)return toast('اسمح بفتح النوافذ للطباعة','error')
   w.document.open()
-  w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>ملصقات Drop Off · ${orders.length} طلب</title><style>@page{size:A4;margin:8mm}body{font-family:Arial}.sheet{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm}.label{border:1px solid #333;border-radius:8px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:5px;break-inside:avoid;font-size:11px;overflow-wrap:anywhere}.label img{width:35mm;height:35mm}.label b{font-size:13px}</style></head><body><div class="sheet">`)
+  w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>ملصقات Drop Off · ${orders.length} طلب</title><style>@page{size:A4;margin:8mm}${labelPrintCss}</style></head><body><div class="sheet">`)
   for(let i=0;i<orders.length;i+=40){
     const labels=await Promise.all(orders.slice(i,i+40).map(async o=>{
-      const qr=await QRCode.toDataURL(o.order_code,{width:220,margin:1})
-      return `<div class="label"><b>DROP OFF · ${esc(o.order_code)}</b><img src="${qr}"><b>${esc(storeName(o.store_id))}</b><span>${esc(o.customer_name)} · ${esc(o.customer_phone)}</span><span>${esc(o.area)} · ${esc(o.address)}</span><span>${o.parcel_count||1} قطعة · ${o.priority==='urgent'?'مستعجل':'عادي'}</span><b>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</b></div>`
+      const qr=await QRCode.toDataURL(o.order_code,{width:300,margin:1,errorCorrectionLevel:'H'})
+      return qrLabel(o,qr)
     }))
     w.document.write(labels.join(''))
   }
   w.document.write('</div></body></html>')
-  w.document.close();setTimeout(()=>w.print(),700)
+  w.document.close()
+  await printWhenReady(w)
 }
 
 async function printQr(o){
   if(!o)return
   const w=window.open('','_blank','width=450,height=650')
   if(!w)return toast('اسمح بفتح النوافذ للطباعة','error')
-  const payload=o.order_code
-  const dataUrl=await QRCode.toDataURL(payload,{width:300,margin:1,errorCorrectionLevel:'M'})
-  w.document.write(`<html dir="rtl"><head><meta charset="utf-8"><title>${esc(o.order_code)}</title><style>@page{size:100mm 100mm;margin:4mm}body{margin:0;font-family:Arial;display:grid;place-items:center;padding:4mm;color:#111}.label{width:88mm;border:1px solid #222;border-radius:10px;padding:8px;text-align:center;box-sizing:border-box}.label img{width:36mm;height:36mm;object-fit:contain}.brand{font-size:19px;font-weight:900}.price{font-size:17px;font-weight:900}.details{font-size:12px;line-height:1.5;overflow-wrap:anywhere}</style></head><body><div class="label"><div class="brand">DROP OFF</div><strong>${esc(o.order_code)}</strong><br><img src="${dataUrl}" alt="QR"><h3>${esc(storeName(o.store_id))}</h3><div class="details">${esc(o.customer_name)} · ${esc(o.customer_phone)}<br>${esc(o.area)} — ${esc(o.address)}<br>${esc(o.parcel_count||1)} قطعة · ${o.priority==='urgent'?'مستعجل · ':''}${o.payment_type==='prepaid'?'مدفوع':'تحصيل'}${o.notes?`<br>${esc(o.notes)}`:''}</div><div class="price">${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</div></div></body></html>`)
+  const qr=await QRCode.toDataURL(o.order_code,{width:360,margin:1,errorCorrectionLevel:'H'})
+  w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(o.order_code)}</title><style>@page{size:100mm 100mm;margin:4mm}${labelPrintCss}</style></head><body><div class="single">${qrLabel(o,qr)}</div></body></html>`)
   w.document.close()
-  setTimeout(()=>w.print(),400)
+  await printWhenReady(w)
 }
 
 async function renderOrders(){
