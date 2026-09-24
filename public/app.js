@@ -100,7 +100,7 @@ async function boot(){
   const p=portal()
   if(!portalMeta[p].roles.includes(profile.role)){
     await supabase.auth.signOut()
-    app.innerHTML=`<div class="auth-wrap"><div class="auth-card"><div class="brand"><div class="logo-shell"><img src="/assets/logo.png"></div><h1>Drop Off</h1></div><p style="text-align:center">هذا الحساب لا يملك صلاحية الدخول إلى ${portalMeta[p].title}.</p><button id="backLogin" class="btn btn-primary full">رجوع</button></div></div>`
+    app.innerHTML=`<div class="auth-wrap"><div class="auth-card"><div class="brand"><div class="logo-shell"><img src="/assets/logo-transparent.png"></div><h1>Drop Off</h1></div><p style="text-align:center">هذا الحساب لا يملك صلاحية الدخول إلى ${portalMeta[p].title}.</p><button id="backLogin" class="btn btn-primary full">رجوع</button></div></div>`
     qs('#backLogin').onclick=renderAuth
     return
   }
@@ -118,7 +118,7 @@ function renderAuth(){
     <div class="auth-glow auth-glow-one"></div><div class="auth-glow auth-glow-two"></div>
     <div class="auth-layout">
       <section class="auth-showcase">
-        <div class="auth-logo"><img src="/assets/logo.png" alt="Drop Off"></div>
+        <div class="auth-logo"><img src="/assets/logo-transparent.png" alt="Drop Off"></div>
         <div class="auth-showcase-copy"><span class="eyebrow">DROP OFF MANAGEMENT</span><h1>توصيل منظم.<br><em>إدارة أسرع.</em></h1><p>${portalLine}</p></div>
         <div class="auth-points"><span>✓ متابعة مباشرة</span><span>✓ حسابات دقيقة</span><span>✓ دخول آمن</span></div>
         <div class="auth-mark">DO <small>DELIVERY SERVICES</small></div>
@@ -181,11 +181,11 @@ function navItems(){
 }
 function renderShell(){
   app.innerHTML=`<div class="shell"><aside class="sidebar">
-    <div class="side-brand"><img src="/assets/logo.png"><div><strong>Drop Off</strong><small>${esc(roleLabels[profile.role]||profile.role)}</small></div><span class="live-dot"></span></div>
+    <div class="side-brand"><img src="/assets/logo-transparent.png"><div><strong>Drop Off</strong><small>${esc(roleLabels[profile.role]||profile.role)}</small></div><span class="live-dot"></span></div>
     <div id="nav" class="nav">${navItems().map(([id,label])=>`<button data-tab="${id}">${label}</button>`).join('')}</div>
     <div class="side-foot"><div class="user-pill">${esc(profile.full_name||profile.username||profile.phone||'مستخدم')}<small>${esc(profile.phone||profile.username||'')}</small></div><button id="logout" class="btn btn-ghost full">تسجيل خروج</button></div>
   </aside><main class="main">
-    <div class="topbar"><div class="mobile-brand"><img src="/assets/logo.png"><span>Drop Off</span></div><div><h2 id="pageTitle">Drop Off</h2><div id="pageSub" class="muted"></div></div><div class="actions"><button id="refresh" class="btn btn-ghost">↻ تحديث</button></div></div>
+    <div class="topbar"><div class="mobile-brand"><img src="/assets/logo-transparent.png"><span>Drop Off</span></div><div><h2 id="pageTitle">Drop Off</h2><div id="pageSub" class="muted"></div></div><div class="actions"><button id="refresh" class="btn btn-ghost">↻ تحديث</button></div></div>
     <section id="content"></section>
   </main></div>`
   qsa('#nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.tab))
@@ -338,7 +338,7 @@ async function printStickerRoll(rollId){
   for(const s of data){
     const qr=await QRCode.toDataURL(`DROP-OFF:${s.qr_token}`,{width:220,margin:1,errorCorrectionLevel:'M'})
     labels.push(`<div class="label">
-      <div class="brandRow"><img src="${location.origin}/assets/logo.png"><div><strong>DROP OFF</strong><small>DELIVERY SERVICES</small></div></div>
+      <div class="brandRow"><img src="${location.origin}/assets/logo-transparent.png"><div><strong>DROP OFF</strong><small>DELIVERY SERVICES</small></div></div>
       <div class="stickerNo">${esc(s.sticker_code)}</div>
       <img class="qr" src="${qr}">
       <div class="line"><span>الاسم</span></div>

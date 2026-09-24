@@ -4,12 +4,12 @@
   "start_url": "/admin",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#031426",
-  "theme_color": "#f36f00",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "icons": [
     {
-      "src": "/assets/logo.png",
-      "sizes": "512x512",
+      "src": "/assets/logo-transparent.png",
+      "sizes": "1254x1254",
       "type": "image/png",
       "purpose": "any"
     }
