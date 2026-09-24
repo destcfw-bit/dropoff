@@ -75,6 +75,7 @@ a{color:inherit}
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:54px;margin-bottom:20px}
 .topbar h2{margin:0;font-size:24px}.topbar .muted{font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap}
 .mobile-brand{display:none}
+.mobile-menu,.mobile-logout{display:none}
 
 .panel{background:linear-gradient(155deg,rgba(13,35,55,.92),rgba(7,21,34,.94));border:1px solid var(--line);border-radius:22px;padding:16px;box-shadow:0 15px 45px rgba(0,0,0,.14)}
 .panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:13px}.panel-head h3,.panel h3{margin:0}
@@ -205,6 +206,58 @@ button:focus-visible,a:focus-visible{outline:3px solid #c65300;outline-offset:3p
   .auth-showcase{border-color:var(--line)}
   .sidebar{background:transparent}
   .nav,.topbar{background:rgba(255,255,255,.97);border-color:var(--line)}
+}
+/* Phone layout: compact login and a usable navigation drawer for administration. */
+@media(max-width:760px){
+  html,body,#app,.shell,.main{max-width:100%;min-width:0}
+  .main{padding-right:12px;padding-left:12px}
+  .mobile-logout{display:inline-flex}
+  .mobile-action{min-width:40px;min-height:40px;align-items:center;justify-content:center;padding:7px 9px;font-size:19px}
+  .mobile-action span{display:none}
+  .topbar{min-height:62px;gap:5px}
+  .topbar .actions{gap:5px;flex-wrap:nowrap}
+  .mobile-brand{min-width:0;gap:5px;font-size:14px;white-space:nowrap}
+  .mobile-brand img{width:55px;height:36px;flex:none}
+  .panel,.card,.stat,.welcome-card,.captain-order,.finance-strip,.table-wrap,.form-grid>*{min-width:0;max-width:100%}
+  .panel-head,.toolbar,.quick-actions,.captain-order .quick{min-width:0}
+  .toolbar>*{min-width:0;max-width:100%;flex:1 1 140px}
+  .table-wrap{overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+  .quick-actions .btn,.captain-order .quick .btn{min-width:0;white-space:normal}
+  .order-row{grid-template-columns:28px minmax(0,1fr)}
+  .order-row .idx{width:28px;height:28px}
+  .auth-wrap{padding:10px 10px max(20px,env(safe-area-inset-bottom))}
+  .auth-layout{width:100%;border-radius:22px}
+  .auth-showcase{min-height:0;padding:18px 16px 16px}
+  .auth-logo{width:min(185px,65vw);height:120px}
+  .auth-showcase-copy{margin-top:7px}
+  .auth-showcase-copy h1{font-size:clamp(23px,6vw,28px);margin:3px 0}
+  .auth-showcase-copy p{font-size:12px;line-height:1.5}
+  .auth-card{padding:22px 18px 26px}
+  .auth-form-head{margin-bottom:14px}
+  .auth-form-head h2{font-size:24px;margin:10px 0 4px}
+  .auth-field{margin:10px 0}
+  .input-shell input{font-size:16px}
+  .session-note{margin:9px 2px 13px}
+  .login-foot{margin-top:15px}
+  body[data-portal="admin"]{padding-bottom:0}
+  body[data-portal="admin"].menu-open{overflow:hidden}
+  body[data-portal="admin"] .mobile-menu{display:inline-flex}
+  body[data-portal="admin"] .nav{display:none;position:fixed;z-index:55;top:62px;right:0;bottom:0;left:0;width:100%;height:auto;padding:14px 12px max(18px,env(safe-area-inset-bottom));flex-direction:column;gap:6px;overflow-y:auto;overflow-x:hidden;border-top:1px solid var(--line);background:#fff;backdrop-filter:none}
+  body[data-portal="admin"] .nav.open{display:flex}
+  body[data-portal="admin"] .nav button{width:100%;min-width:0;min-height:48px;flex:none;text-align:right;padding:12px 16px;font-size:15px}
+  body[data-portal="store"] .nav button{min-width:0}
+  body[data-portal="captain"] .nav button{min-width:0}
+  body[data-portal="store"] .nav,body[data-portal="captain"] .nav{height:calc(65px + env(safe-area-inset-bottom));padding-bottom:max(7px,env(safe-area-inset-bottom));overflow-x:hidden}
+  .toast{bottom:calc(80px + env(safe-area-inset-bottom))}
+  body[data-portal="admin"] .toast{bottom:16px}
+}
+@media(max-width:360px){
+  .mobile-brand span{display:none}
+  .stats{grid-template-columns:1fr 1fr}
+  .stat{padding:10px}
+  .stat b{font-size:20px}
+  .auth-wrap{padding:6px}
+  .auth-card{padding:18px 13px 22px}
 }
 @media(prefers-reduced-motion:reduce){
   *,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
