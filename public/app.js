@@ -191,11 +191,14 @@ function renderShell(){
     <div id="nav" class="nav">${navItems().map(([id,label])=>`<button data-tab="${id}">${label}</button>`).join('')}</div>
     <div class="side-foot"><div class="user-pill">${esc(profile.full_name||profile.username||profile.phone||'مستخدم')}<small>${esc(profile.phone||profile.username||'')}</small></div><button id="logout" class="btn btn-ghost full">تسجيل خروج</button></div>
   </aside><main class="main">
-    <div class="topbar"><div class="mobile-brand"><img src="/assets/logo-transparent.png"><span>Drop Off</span></div><div><h2 id="pageTitle">Drop Off</h2><div id="pageSub" class="muted"></div></div><div class="actions"><button id="refresh" class="btn btn-ghost">↻ تحديث</button></div></div>
+    <div class="topbar"><div class="mobile-brand"><img src="/assets/logo-transparent.png" alt="Drop Off"><span>Drop Off</span></div><div><h2 id="pageTitle">Drop Off</h2><div id="pageSub" class="muted"></div></div><div class="actions"><button id="refresh" class="btn btn-ghost mobile-action" aria-label="تحديث">↻ <span>تحديث</span></button><button id="mobileLogout" class="btn btn-ghost mobile-action mobile-logout" aria-label="تسجيل خروج" title="تسجيل خروج">⇥</button><button id="mobileMenu" class="btn btn-ghost mobile-action mobile-menu" aria-label="فتح القائمة" aria-controls="nav" aria-expanded="false">☰</button></div></div>
     <section id="content"></section>
   </main></div>`
-  qsa('#nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.tab))
-  qs('#logout').onclick=()=>supabase.auth.signOut({scope:'local'})
+  const menu=qs('#mobileMenu'),nav=qs('#nav')
+  const closeMenu=()=>{nav.classList.remove('open');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','فتح القائمة');document.body.classList.remove('menu-open')}
+  qsa('#nav button').forEach(b=>b.onclick=()=>{closeMenu();openTab(b.dataset.tab)})
+  menu.onclick=()=>{const open=nav.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'إغلاق القائمة':'فتح القائمة');document.body.classList.toggle('menu-open',open)}
+  qs('#logout').onclick=qs('#mobileLogout').onclick=()=>supabase.auth.signOut({scope:'local'})
   qs('#refresh').onclick=()=>openTab(currentTab,true)
 }
 async function openTab(tab,force=false){
