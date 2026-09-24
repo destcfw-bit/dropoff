@@ -285,8 +285,8 @@ async function renderStickers(){
   if(error)throw error
   const orders=data||[]
   qs('#content').innerHTML=`<div class="welcome-card"><div><span class="eyebrow">DROP OFF LABELS</span><h3>ملصقات الطلبات 📦</h3><p>المحل يسجل البيانات؛ هنا اطبع رقم الطلب وQR والتفاصيل، ثم الصق الملصق على الكيس.</p></div></div>
-    <div class="panel"><div class="panel-head"><h3>الطلبات الأخيرة</h3><span class="muted">آخر 500 طلب · يمكن إعادة طباعة أي ملصق</span></div>
-      <div class="toolbar" style="margin-bottom:12px"><select id="labelStore"><option value="">كل المحلات</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><input id="labelSearch" placeholder="ابحث برقم الطلب أو اسم الزبون أو الهاتف"><button id="printSelected" class="btn btn-primary">طباعة المحدد</button></div>
+    <div class="panel"><div class="panel-head"><h3>الطلبات الأخيرة</h3><span class="muted">تظهر آخر 500 هنا؛ زر طباعة الكل يجلب جميع الطلبات، ويطبق فلتر المحل والبحث</span></div>
+      <div class="toolbar" style="margin-bottom:12px"><select id="labelStore"><option value="">كل المحلات</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><input id="labelSearch" placeholder="ابحث برقم الطلب أو اسم الزبون أو الهاتف"><button id="printSelected" class="btn btn-blue">طباعة المحدد</button><button id="printAllLabels" class="btn btn-primary">طباعة كل الأكواد دفعة واحدة</button></div>
       <div id="labelOrders"></div>
     </div>`
   const draw=()=>{
@@ -302,6 +302,29 @@ async function renderStickers(){
     const selected=orders.filter(o=>ids.has(o.id))
     if(!selected.length)return toast('حدد طلباً واحداً على الأقل','error')
     printQrBatch(selected)
+  }
+  qs('#printAllLabels').onclick=async()=>{
+    // Open while the click is active so the browser does not block the print window.
+    const w=window.open('','_blank','width=1000,height=800')
+    if(!w)return toast('اسمح بفتح النوافذ للطباعة','error')
+    w.document.write('<html dir="rtl"><meta charset="utf-8"><body style="font-family:Arial;padding:25px">جاري تجهيز ملصقات الطلبات...</body></html>')
+    const b=qs('#printAllLabels'),storeId=qs('#labelStore').value,search=qs('#labelSearch').value.trim().toLowerCase()
+    b.disabled=true;b.textContent='جاري تجهيز الملصقات...'
+    try{
+      const all=[]
+      for(let offset=0;;offset+=500){
+        let query=supabase.from('orders').select('id,order_code,store_id,customer_name,customer_phone,area,address,amount_to_collect,payment_type,parcel_count,priority,created_at')
+          .order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+499)
+        if(storeId)query=query.eq('store_id',storeId)
+        const {data:page,error:pageError}=await query
+        if(pageError)throw pageError
+        all.push(...(page||[]).filter(o=>!search||[o.order_code,o.customer_name,o.customer_phone].some(v=>String(v||'').toLowerCase().includes(search))))
+        if((page||[]).length<500)break
+      }
+      if(!all.length){w.close();return toast('لا توجد طلبات مطابقة للطباعة','error')}
+      await printQrBatch(all,w)
+    }catch(error){w.close();toast(errText(error),'error')}
+    finally{b.disabled=false;b.textContent='طباعة كل الأكواد دفعة واحدة'}
   }
   draw()
 }
@@ -444,14 +467,19 @@ async function saveBatch(){
   qs('#printAllQr').onclick=()=>printQrBatch(data)
 }
 
-async function printQrBatch(orders){
-  const w=window.open('','_blank','width=1000,height=800')
+async function printQrBatch(orders,printWindow=null){
+  const w=printWindow||window.open('','_blank','width=1000,height=800')
   if(!w)return toast('اسمح بفتح النوافذ للطباعة','error')
-  const labels=await Promise.all(orders.map(async o=>{
-    const qr=await QRCode.toDataURL(o.order_code,{width:220,margin:1})
-    return `<div class="label"><b>DROP OFF · ${esc(o.order_code)}</b><img src="${qr}"><b>${esc(storeName(o.store_id))}</b><span>${esc(o.customer_name)} · ${esc(o.customer_phone)}</span><span>${esc(o.area)} · ${esc(o.address)}</span><span>${o.parcel_count||1} قطعة · ${o.priority==='urgent'?'مستعجل':'عادي'}</span><b>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</b></div>`
-  }))
-  w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>ملصقات Drop Off</title><style>@page{size:A4;margin:8mm}body{font-family:Arial}.sheet{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm}.label{border:1px solid #333;border-radius:8px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:5px;break-inside:avoid;font-size:11px}.label img{width:35mm;height:35mm}.label b{font-size:13px}</style></head><body><div class="sheet">${labels.join('')}</div></body></html>`)
+  w.document.open()
+  w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>ملصقات Drop Off · ${orders.length} طلب</title><style>@page{size:A4;margin:8mm}body{font-family:Arial}.sheet{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm}.label{border:1px solid #333;border-radius:8px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:5px;break-inside:avoid;font-size:11px;overflow-wrap:anywhere}.label img{width:35mm;height:35mm}.label b{font-size:13px}</style></head><body><div class="sheet">`)
+  for(let i=0;i<orders.length;i+=40){
+    const labels=await Promise.all(orders.slice(i,i+40).map(async o=>{
+      const qr=await QRCode.toDataURL(o.order_code,{width:220,margin:1})
+      return `<div class="label"><b>DROP OFF · ${esc(o.order_code)}</b><img src="${qr}"><b>${esc(storeName(o.store_id))}</b><span>${esc(o.customer_name)} · ${esc(o.customer_phone)}</span><span>${esc(o.area)} · ${esc(o.address)}</span><span>${o.parcel_count||1} قطعة · ${o.priority==='urgent'?'مستعجل':'عادي'}</span><b>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</b></div>`
+    }))
+    w.document.write(labels.join(''))
+  }
+  w.document.write('</div></body></html>')
   w.document.close();setTimeout(()=>w.print(),700)
 }
 
