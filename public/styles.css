@@ -200,6 +200,11 @@ button:focus-visible,a:focus-visible{outline:3px solid #c65300;outline-offset:3p
 .toast.error{background:#fff4f4;border-color:#eabfc5;color:#992a38}
 .toast.ok{background:#f0fbf4;border-color:#c0dfcd;color:#176b43}
 .capacity{max-width:100%;padding:9px;border-radius:10px}
+.created-order{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:16px;padding:18px;border:1px solid #cfe3d8;border-radius:18px;background:#f7fcf9;overflow-wrap:anywhere}
+.created-order h3{margin:10px 0;font-size:24px;color:var(--navy)}
+.created-order p{margin:6px 0;color:#36516a}
+.created-order small{color:var(--muted)}
+.created-order img{width:150px;height:150px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:12px;padding:5px;flex:none}
 @media(max-width:760px){
   body:has(.auth-wrap){padding-bottom:0}
   .auth-logo{width:220px;height:156px}
@@ -250,6 +255,8 @@ button:focus-visible,a:focus-visible{outline:3px solid #c65300;outline-offset:3p
   body[data-portal="store"] .nav,body[data-portal="captain"] .nav{height:calc(65px + env(safe-area-inset-bottom));padding-bottom:max(7px,env(safe-area-inset-bottom));overflow-x:hidden}
   .toast{bottom:calc(80px + env(safe-area-inset-bottom))}
   body[data-portal="admin"] .toast{bottom:16px}
+  .created-order{flex-direction:column;align-items:stretch;padding:14px}
+  .created-order img{align-self:center}
 }
 @media(max-width:360px){
   .mobile-brand span{display:none}
