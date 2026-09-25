@@ -968,18 +968,19 @@ function manageUser(u){
 async function renderAccounts(){
   await loadCommon()
   const dayStart=new Date(`${accountingDate}T00:00:00+03:00`),dayEnd=new Date(dayStart.getTime()+86400000)
-  const [{data:sb,error:e1},{data:cb,error:e2},{data:overview,error:e3},{data:closures,error:e4},{data:expenses,error:e5},{data:handovers,error:e6},{data:dailyDelivered,error:e7},{data:dailyHandovers,error:e8},{data:dailyReturns,error:e9}] = await Promise.all([
+  const [{data:sb,error:e1},{data:cb,error:e2},{data:overview,error:e3},{data:closures,error:e4},{data:expenses,error:e5},{data:handovers,error:e6},{data:dailyDelivered,error:e7},{data:dailyHandovers,error:e8},{data:dailyReturns,error:e9},{data:dailyCosts,error:e10}] = await Promise.all([
     supabase.from('store_balance_summary').select('*').order('store_name'),
     supabase.from('captain_cash_summary').select('*'),
     supabase.rpc('accounting_overview',{p_day:accountingDate}),
     supabase.from('accounting_closures').select('*').order('business_date',{ascending:false}).limit(30),
-    supabase.from('accounting_expenses').select('amount,category,note,spent_at,method').order('spent_at',{ascending:false}).limit(20),
+    supabase.from('accounting_expenses').select('amount,category,note,spent_at,method,store_id,area').order('spent_at',{ascending:false}).limit(20),
     supabase.from('captain_handovers').select('id,captain_id,amount,handed_over_at,method').order('handed_over_at',{ascending:false}).limit(20),
     supabase.from('orders').select('delivery_captain_id,store_id,area,amount_to_collect,delivery_fee').eq('status','delivered').gte('delivered_at',dayStart.toISOString()).lt('delivered_at',dayEnd.toISOString()).limit(5000),
     supabase.from('captain_handovers').select('captain_id,amount').gte('handed_over_at',dayStart.toISOString()).lt('handed_over_at',dayEnd.toISOString()).limit(5000),
-    supabase.from('orders').select('store_id,area,return_fee').eq('status','returned_store').gte('returned_at',dayStart.toISOString()).lt('returned_at',dayEnd.toISOString()).limit(5000)
+    supabase.from('orders').select('store_id,area,return_fee').eq('status','returned_store').gte('returned_at',dayStart.toISOString()).lt('returned_at',dayEnd.toISOString()).limit(5000),
+    supabase.from('accounting_expenses').select('store_id,area,amount').gte('spent_at',dayStart.toISOString()).lt('spent_at',dayEnd.toISOString()).limit(5000)
   ])
-  if(e1||e2||e3||e4||e5||e6||e7||e8||e9)throw e1||e2||e3||e4||e5||e6||e7||e8||e9
+  if(e1||e2||e3||e4||e5||e6||e7||e8||e9||e10)throw e1||e2||e3||e4||e5||e6||e7||e8||e9||e10
   const closed=(closures||[]).find(x=>x.business_date===accountingDate)
   const changedAfterClose=closed&&['orders_cash','handovers_cash','store_payouts','expenses','fees_earned'].some(k=>Number(closed[k])!==Number(overview[k]))
   const expenseNames={salary:'رواتب',fuel:'وقود',warehouse:'مخزن',other:'أخرى'}
@@ -988,7 +989,8 @@ async function renderAccounts(){
     const totals=new Map()
     for(const o of dailyDelivered||[])totals.set(o[key]||'—',(totals.get(o[key]||'—')||0)+Number(o.delivery_fee||0))
     for(const o of dailyReturns||[])totals.set(o[key]||'—',(totals.get(o[key]||'—')||0)+Number(o.return_fee||0))
-    return [...totals].sort((a,b)=>b[1]-a[1])
+    for(const x of dailyCosts||[])if(x[key])totals.set(x[key],totals.get(x[key])||0)
+    return [...totals].map(([name,fees])=>({name,fees,expenses:sum((dailyCosts||[]).filter(x=>x[key]===name),'amount')})).sort((a,b)=>(b.fees-b.expenses)-(a.fees-a.expenses))
   }
   const day=accountingDate
   qs('#content').innerHTML=`<div class="panel accounting-head"><div class="panel-head"><div><span class="eyebrow">DROP OFF MANAGEMENT · الحسابات</span><h3>جرد الإدارة والمحاسب</h3></div><div class="field"><label for="accountingDate">تاريخ الجرد</label><input id="accountingDate" type="date" value="${esc(day)}"></div></div>
@@ -1001,11 +1003,11 @@ async function renderAccounts(){
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>عهدة الكباتن</h3></div><div class="cards">${(cb||[]).map(x=>`<div class="card"><h4>${esc(x.full_name||'كابتن')}</h4><p>تحصيل: ${money(x.cash_collected)}</p><p>سلّم: ${money(x.cash_handed_over)}</p><div class="money">${money(x.cash_due)}</div><button class="btn btn-sm btn-blue handover" data-id="${x.captain_id}">تسجيل تسليم كاش</button></div>`).join('')||'<div class="empty">لا يوجد كباتن</div>'}</div></div>`
   const insights=document.createElement('div');insights.className='accounting-ledger'
   insights.innerHTML=`<div class="panel"><div class="panel-head"><h3>مطابقة كل كابتن · ${esc(day)}</h3></div>${(cb||[]).map(c=>{const delivered=sum((dailyDelivered||[]).filter(x=>x.delivery_captain_id===c.captain_id),'amount_to_collect'),handed=sum((dailyHandovers||[]).filter(x=>x.captain_id===c.captain_id),'amount');return `<div class="ledger-row"><span>${esc(c.full_name||'كابتن')}<small class="muted"> · تحصيل اليوم ${money(delivered)} · سلّم اليوم ${money(handed)} · عهدته الآن ${money(c.cash_due)}</small></span><b>${Number(c.cash_due)>0?'نقص '+money(c.cash_due):'مُصفّى'}</b></div>`}).join('')||'<div class="empty">لا يوجد كباتن</div>'}</div>
-  <div class="panel"><div class="panel-head"><h3>رسوم اليوم حسب المحل والمنطقة</h3></div><h4>المحلات</h4>${feesBy('store_id').map(([id,amount])=>`<div class="ledger-row"><span>${esc(stores.find(s=>s.id===id)?.name||'—')}</span><b>${money(amount)}</b></div>`).join('')||'<p class="muted">لا توجد رسوم اليوم</p>'}<h4>المناطق</h4>${feesBy('area').map(([area,amount])=>`<div class="ledger-row"><span>${esc(area)}</span><b>${money(amount)}</b></div>`).join('')||'<p class="muted">لا توجد مناطق اليوم</p>'}</div>`
+  <div class="panel"><div class="panel-head"><h3>صافي اليوم حسب المحل والمنطقة</h3></div><p class="muted">الصافي = الرسوم − المصاريف المرتبطة بهذا المحل أو المنطقة. المصاريف العامة تبقى ضمن ربح الشركة الإجمالي.</p><h4>المحلات</h4>${feesBy('store_id').map(x=>`<div class="ledger-row"><span>${esc(stores.find(s=>s.id===x.name)?.name||'—')}<small class="muted"> · رسوم ${money(x.fees)} · مصاريف ${money(x.expenses)}</small></span><b>${money(x.fees-x.expenses)}</b></div>`).join('')||'<p class="muted">لا توجد حركات اليوم</p>'}<h4>المناطق</h4>${feesBy('area').map(x=>`<div class="ledger-row"><span>${esc(x.name)}<small class="muted"> · رسوم ${money(x.fees)} · مصاريف ${money(x.expenses)}</small></span><b>${money(x.fees-x.expenses)}</b></div>`).join('')||'<p class="muted">لا توجد مناطق اليوم</p>'}</div>`
   qs('#content').append(insights)
   const ledger=document.createElement('div');ledger.className='accounting-ledger'
   ledger.innerHTML=`<div class="panel"><div class="panel-head"><h3>تسليمات الكباتن للمحاسب</h3></div>${(handovers||[]).map(x=>`<div class="ledger-row"><span>${esc(captainName(x.captain_id))} · ${new Date(x.handed_over_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})}<small class="muted"> · إيصال ${esc(x.id.slice(0,8).toUpperCase())}</small></span><b>${money(x.amount)}</b></div>`).join('')||'<div class="empty">لا توجد تسليمات</div>'}</div>
-  <div class="panel"><div class="panel-head"><h3>مصاريف التشغيل</h3></div><form id="expenseForm" class="form-grid two"><div class="field"><label>النوع</label><select id="expenseCategory"><option value="salary">رواتب</option><option value="fuel">وقود</option><option value="warehouse">مخزن</option><option value="other">أخرى</option></select></div><div class="field"><label>المبلغ</label><input id="expenseAmount" type="number" min="0.01" step="0.01" required></div><div class="field"><label>الدفع</label><select id="expenseMethod"><option value="cash">نقداً</option><option value="bank">تحويل</option></select></div><div class="field"><label>تفاصيل</label><input id="expenseNote" maxlength="200" placeholder="مثال: وقود سيارة التوصيل"></div><button type="submit" class="btn btn-blue">تسجيل المصروف</button></form>${(expenses||[]).map(x=>`<div class="ledger-row"><span>${esc(expenseNames[x.category]||x.category)} · ${esc(x.note||'')} · ${x.method==='bank'?'تحويل':'نقداً'}</span><b>${money(x.amount)}</b></div>`).join('')}</div></div>
+  <div class="panel"><div class="panel-head"><h3>مصاريف التشغيل</h3></div><form id="expenseForm" class="form-grid two"><div class="field"><label>النوع</label><select id="expenseCategory"><option value="salary">رواتب</option><option value="fuel">وقود</option><option value="warehouse">مخزن</option><option value="other">أخرى</option></select></div><div class="field"><label>المبلغ</label><input id="expenseAmount" type="number" min="0.01" step="0.01" required></div><div class="field"><label>الدفع</label><select id="expenseMethod"><option value="cash">نقداً</option><option value="bank">تحويل</option></select></div><div class="field"><label>تفاصيل</label><input id="expenseNote" maxlength="200" placeholder="مثال: وقود سيارة التوصيل"></div><div class="field"><label>المحل المرتبط (اختياري)</label><select id="expenseStore"><option value="">مصروف عام</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div><div class="field"><label>المنطقة المرتبطة (اختياري)</label><input id="expenseArea" maxlength="150" placeholder="اتركها فارغة للمصروف العام"></div><button type="submit" class="btn btn-blue">تسجيل المصروف</button></form>${(expenses||[]).map(x=>`<div class="ledger-row"><span>${esc(expenseNames[x.category]||x.category)} · ${esc(x.note||'')} · ${x.method==='bank'?'تحويل':'نقداً'}${x.store_id?' · '+esc(stores.find(s=>s.id===x.store_id)?.name||''):''}${x.area?' · '+esc(x.area):''}</span><b>${money(x.amount)}</b></div>`).join('')}</div></div>
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>أرشيف التسكير</h3></div>${(closures||[]).map(x=>`<div class="ledger-row"><span>${esc(x.business_date)} · الربح ${money(x.operating_profit)} · ${Number(x.cash_shortage)>=0?'نقص':'زيادة'} ${money(Math.abs(Number(x.cash_shortage)))}</span><b>الصندوق ${money(x.counted_cash)}</b></div>`).join('')||'<div class="empty">لا يوجد تسكير مسجّل بعد</div>'}</div>`
   qs('#content').append(ledger)
   qs('#accountingDate').onchange=e=>{accountingDate=e.target.value;renderAccounts()}
@@ -1020,7 +1022,7 @@ async function renderAccounts(){
   qs('#expenseForm').onsubmit=async e=>{
     e.preventDefault();const amount=Number(qs('#expenseAmount').value)
     if(!(amount>0))return toast('المبلغ غير صحيح','error')
-    const {error}=await supabase.from('accounting_expenses').insert({amount,category:qs('#expenseCategory').value,method:qs('#expenseMethod').value,note:qs('#expenseNote').value.trim(),created_by:profile.id})
+    const {error}=await supabase.from('accounting_expenses').insert({amount,category:qs('#expenseCategory').value,method:qs('#expenseMethod').value,note:qs('#expenseNote').value.trim(),store_id:qs('#expenseStore').value||null,area:qs('#expenseArea').value.trim()||null,created_by:profile.id})
     if(error)return toast(errText(error),'error')
     toast('تم تسجيل المصروف');renderAccounts()
   }
