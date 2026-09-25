@@ -39,7 +39,7 @@ const server = http.createServer(async (req, res) => {
         JSON.stringify({ok:true, service:'Drop Off', version:'3.0.0'}))
     }
 
-    const isPortal = ['/', '/admin', '/captain', '/store'].some(
+    const isPortal = ['/', '/admin', '/management', '/captain', '/store'].some(
       p => raw === p || (p !== '/' && raw.startsWith(p + '/'))
     )
 
