@@ -22,9 +22,10 @@ let profiles = []
 let captains = []
 let currentTab = 'home'
 let accountingDate = new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Amman'})
+let pendingStoreCopy = null
 
 const roleLabels = {
-  admin:'الإدارة', warehouse:'المخزن', pickup_captain:'كابتن جلب',
+  admin:'الإدارة', accountant:'المحاسب', warehouse:'المخزن', pickup_captain:'كابتن جلب',
   delivery_captain:'كابتن توصيل', store_owner:'صاحب محل'
 }
 const statusLabels = {
@@ -61,7 +62,7 @@ function portal(){
 }
 const portalMeta = {
   admin:{title:'لوحة الإدارة',roles:['admin']},
-  management:{title:'رابط الإدارة المالية',roles:['admin']},
+  management:{title:'رابط الإدارة المالية',roles:['admin','accountant']},
   captain:{title:'بوابة الكباتن',roles:['pickup_captain','delivery_captain']},
   store:{title:'بوابة المحلات',roles:['store_owner']}
 }
@@ -161,7 +162,7 @@ function renderAuth(){
 }
 
 async function loadCommon(){
-  if(profile?.role==='admin'){
+  if(profile?.role==='admin'||profile?.role==='accountant'){
     const [{data:s},{data:p},{data:c}] = await Promise.all([
       supabase.from('stores').select('*').order('name'),
       supabase.from('profiles').select('*').order('created_at',{ascending:false}),
@@ -181,7 +182,7 @@ function defaultTab(){
   return 'home'
 }
 function navItems(){
-  if(portal()==='management')return [['accounts','💰 الجرد والحسابات'],['admin_link','↗ إدارة الأوردرات']]
+  if(portal()==='management')return profile.role==='admin'?[['accounts','💰 الجرد والحسابات'],['admin_link','↗ إدارة الأوردرات']]:[['accounts','💰 الجرد والحسابات']]
   if(profile.role==='admin')return [
     ['home','⌂ الرئيسية'],['stickers','🏷️ طباعة الملصقات'],['add','＋ إضافة أوردرات'],['orders','▦ الأوردرات'],
     ['assign','⇄ التوزيع'],['operations','📦 العمليات'],['stores','🏪 المحلات'],['users','👥 الحسابات'],['management_link','💰 رابط الإدارة المالية']
@@ -251,22 +252,28 @@ function categoryBadges(categories){
 }
 
 async function renderHome(){
-  const {data:o,error}=await supabase.from('orders').select('id,status,amount_to_collect,created_at,promised_at,store_id,delivery_captain_id,payment_type')
+  const {data:o,error}=await supabase.from('orders').select('id,order_code,status,amount_to_collect,customer_phone,area,created_at,promised_at,store_id,delivery_captain_id,payment_type').limit(5000)
   if(error)throw error
   const count=s=>o.filter(x=>x.status===s).length
   const d=new Date();d.setHours(0,0,0,0)
   const today=o.filter(x=>new Date(x.created_at)>=d).length
   const delivered=o.filter(x=>x.status==='delivered'&&x.payment_type!=='prepaid').reduce((a,x)=>a+Number(x.amount_to_collect||0),0)
   const overdue=o.filter(x=>x.promised_at&&new Date(x.promised_at)<new Date()&&!['delivered','returned_store','cancelled'].includes(x.status))
+  const recentActive=o.filter(x=>new Date(x.created_at)>new Date(Date.now()-72*3600000)&&!['delivered','returned_store','cancelled'].includes(x.status))
+  const duplicates=new Map()
+  for(const order of recentActive){const phone=String(order.customer_phone||'').replace(/\D/g,'');if(!phone)continue;const key=`${order.store_id}:${phone}`;duplicates.set(key,[...(duplicates.get(key)||[]),order])}
+  const duplicateGroups=[...duplicates.values()].filter(g=>g.length>1)
   const weekly=o.filter(x=>new Date(x.created_at)>=new Date(Date.now()-7*86400000))
   const byStore=stores.map(s=>({name:s.name,count:weekly.filter(x=>x.store_id===s.id).length})).sort((a,b)=>b.count-a.count)
   qs('#content').innerHTML=`
     <div class="welcome-card"><div><span class="eyebrow">DROP OFF CONTROL CENTER</span><h3>أهلاً ${esc(profile.full_name||'بالإدارة')} 👋</h3><p>الأوردرات والمخزن والكباتن والحسابات بمكان واحد.</p></div><div class="quick-actions"><button class="btn btn-primary go" data-tab="add">＋ أوردر جديد</button><button class="btn btn-ghost go" data-tab="assign">توزيع الأوردرات</button></div></div>
     <div class="grid stats">${stat('إجمالي الأوردرات',o.length)}${stat('أوردرات اليوم',today)}${stat('بالمخزن',count('in_warehouse'))}${stat('مع الكباتن',count('assigned')+count('out_for_delivery'))}${stat('تم التسليم',count('delivered'))}${stat('متأخرة وتحتاج متابعة',overdue.length)}</div>
     <div class="finance-strip"><span>قيمة التحصيلات المسلّمة</span><strong>${money(delivered)}</strong><span class="mini-status">● النظام متصل</span></div>
+    <div class="panel alert-panel"><div class="panel-head"><h3>تنبيهات تحتاج متابعة</h3><span class="badge orange">${overdue.length+duplicateGroups.length} تنبيه</span></div><div class="accounting-ledger"><div><h4>طلبات متأخرة</h4>${overdue.slice(0,10).map(x=>`<button class="alert-order" data-code="${esc(x.order_code)}">${esc(x.order_code)} · ${esc(x.area||'—')} · ${esc(storeName(x.store_id))}</button>`).join('')||'<p class="muted">ما في أوردرات متأخرة</p>'}</div><div><h4>أرقام مكررة خلال 72 ساعة لنفس المحل</h4>${duplicateGroups.slice(0,10).map(g=>`<button class="alert-order" data-code="${esc(g[0].order_code)}">${esc(storeName(g[0].store_id))} · ${esc(g[0].customer_phone)} · ${g.length} أوردرات</button>`).join('')||'<p class="muted">ما في أوردرات متكررة</p>'}</div></div></div>
     <div class="panel"><div class="panel-head"><h3>آخر الأوردرات</h3><button class="btn btn-ghost go" data-tab="orders">عرض الكل</button></div><div id="latest"></div></div>
     <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>نشاط المحلات آخر 7 أيام</h3></div><div class="cards">${byStore.map(s=>`<div class="card"><h4>${esc(s.name)}</h4><div class="money">${s.count} طلب</div></div>`).join('')||'<div class="empty">لا يوجد محلات</div>'}</div></div>`
   qsa('.go').forEach(b=>b.onclick=()=>openTab(b.dataset.tab))
+  qsa('.alert-order').forEach(b=>b.onclick=async()=>{await openTab('orders');qs('#searchOrder').value=b.dataset.code;loadOrders()})
   const {data}=await supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(10)
   qs('#latest').innerHTML=orderTable(data||[])
 }
@@ -334,8 +341,12 @@ async function renderStickers(){
 }
 
 async function renderStoreNew(){
-  const {data:links,error}=await supabase.from('store_users').select('store_id,stores(id,name,active)').eq('user_id',profile.id)
+  const [{data:links,error},{data:rates,error:rateError}]=await Promise.all([
+    supabase.from('store_users').select('store_id,stores(id,name,active,delivery_fee)').eq('user_id',profile.id),
+    supabase.from('area_rates').select('store_id,area,delivery_fee')
+  ])
   if(error)throw error
+  if(rateError)throw rateError
   const owned=(links||[]).map(x=>x.stores).filter(s=>s?.active)
   if(!owned.length){qs('#content').innerHTML='<div class="panel"><div class="empty">حسابك غير مربوط بمحل نشط.</div></div>';return}
 
@@ -343,8 +354,8 @@ async function renderStoreNew(){
     <div class="panel"><form id="storeOrderForm" class="form-grid two">
       <div class="field"><label for="soStore">المحل</label><select id="soStore" required>${owned.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field"><label for="soName">اسم الزبون</label><input id="soName" required maxlength="150"></div>
-      <div class="field"><label for="soPhone">رقم الهاتف</label><input id="soPhone" required inputmode="tel" maxlength="40"></div>
-      <div class="field"><label for="soArea">المنطقة</label><input id="soArea" required maxlength="150"></div>
+      <div class="field"><label for="soPhone">رقم الهاتف</label><input id="soPhone" required inputmode="tel" maxlength="40"><small id="storeDuplicate" class="muted"></small></div>
+      <div class="field"><label for="soArea">المنطقة</label><input id="soArea" required maxlength="150"><small id="storeFeeQuote" class="muted">رسوم التوصيل تظهر عند اختيار المنطقة</small></div>
       <div class="field"><label for="soAddress">العنوان</label><input id="soAddress" required maxlength="500"></div>
       <div class="field"><label for="soAmount">المبلغ المطلوب تحصيله</label><input id="soAmount" type="number" step=".01" min="0" max="100000" value="0" required></div>
       <div class="field"><label for="soPayment">الدفع</label><select id="soPayment"><option value="cod">عند التسليم</option><option value="prepaid">مدفوع مسبقاً</option></select></div>
@@ -352,8 +363,60 @@ async function renderStoreNew(){
       <div class="field"><label for="soPriority">الأولوية</label><select id="soPriority"><option value="normal">عادي</option><option value="urgent">مستعجل</option></select></div>
       <div class="field"><label for="soNotes">ملاحظات</label><textarea id="soNotes" maxlength="2000" placeholder="تفاصيل إضافية"></textarea></div>
       <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">✓ إنشاء الطلب والـQR</button></div>
-    </form><div id="storeOrderResult" role="status" aria-live="polite"></div></div>`
+    </form><div id="storeOrderResult" role="status" aria-live="polite"></div></div>
+    <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>رفع أوردرات من Excel أو CSV</h3><button id="storeTemplate" class="btn btn-sm btn-ghost" type="button">تنزيل نموذج CSV</button></div><p class="muted">الأعمدة بالترتيب: الاسم، الهاتف، المنطقة، العنوان، المبلغ، الملاحظات، الدفع (cod/prepaid)، عدد القطع. الحد 50 أوردر في الملف.</p><div class="field"><label for="storeSheet">ملف الأوردرات</label><input id="storeSheet" type="file" accept=".xlsx,.xls,.csv"></div><div id="storeSheetPreview"></div><button id="importStoreSheet" class="btn btn-blue" type="button" disabled>إنشاء الأوردرات من الملف</button></div>`
+  const quote=()=>{
+    const store=owned.find(s=>s.id===qs('#soStore').value),area=qs('#soArea').value.trim().toLocaleLowerCase('ar')
+    const exact=(rates||[]).find(r=>r.store_id===store?.id&&r.area.trim().toLocaleLowerCase('ar')===area)
+    const global=(rates||[]).find(r=>r.store_id===null&&r.area.trim().toLocaleLowerCase('ar')===area)
+    qs('#storeFeeQuote').textContent=area?`رسوم التوصيل المتوقعة: ${money(exact?.delivery_fee??global?.delivery_fee??store?.delivery_fee??0)}`:'رسوم التوصيل تظهر عند اختيار المنطقة'
+  }
+  qs('#soArea').oninput=quote;qs('#soStore').onchange=quote
+  qs('#soPhone').onblur=async()=>{
+    const phone=qs('#soPhone').value.trim();if(!phone)return
+    const {count}=await supabase.from('orders').select('id',{count:'exact',head:true}).eq('store_id',qs('#soStore').value).eq('customer_phone',phone).gte('created_at',new Date(Date.now()-72*3600000).toISOString()).not('status','in','("delivered","returned_store","cancelled")')
+    qs('#storeDuplicate').textContent=count?`⚠️ في ${count} أوردر نشط لنفس الرقم خلال آخر 72 ساعة؛ راجع قبل الإنشاء.`:''
+  }
   qs('#soPayment').onchange=()=>{const prepaid=qs('#soPayment').value==='prepaid';qs('#soAmount').disabled=prepaid;if(prepaid)qs('#soAmount').value='0'}
+  if(pendingStoreCopy){
+    const o=pendingStoreCopy;pendingStoreCopy=null
+    qs('#soStore').value=o.store_id;qs('#soName').value=o.customer_name||'';qs('#soPhone').value=o.customer_phone||''
+    qs('#soArea').value=o.area||'';qs('#soAddress').value=o.address||'';qs('#soAmount').value=Number(o.amount_to_collect||0)
+    qs('#soPayment').value=o.payment_type||'cod';qs('#soParcels').value=o.parcel_count||1
+    qs('#soPriority').value=o.priority||'normal';qs('#soNotes').value=o.notes||''
+    qs('#soPayment').onchange();quote();toast('تم نسخ بيانات الأوردر؛ راجعها ثم اضغط إنشاء')
+  }
+  qs('#storeTemplate').onclick=()=>downloadCsv(['الاسم','الهاتف','المنطقة','العنوان','المبلغ','الملاحظات','الدفع','عدد القطع'],[['زبون مثال','0791234567','عمّان','الشارع والعمارة',10,'','cod',1]],'dropoff-store-orders-template.csv')
+  let importedRows=[]
+  qs('#storeSheet').onchange=async e=>{
+    const file=e.target.files[0];if(!file)return
+    try{
+      let rows
+      if(/\.xlsx?$/i.test(file.name)){
+        const XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs')
+        const book=XLSX.read(await file.arrayBuffer())
+        rows=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1,defval:''})
+      }else rows=parseCsv(await file.text())
+      if(rows.length<2||rows.length>51)throw new Error('الملف لازم يحتوي عنوان الأعمدة و1 إلى 50 أوردر')
+      importedRows=rows.slice(1).map((r,i)=>({line:i+2,name:String(r[0]||'').trim(),phone:String(r[1]||'').trim(),area:String(r[2]||'').trim(),address:String(r[3]||'').trim(),amount:Number(r[4]||0),notes:String(r[5]||'').trim(),payment:String(r[6]||'cod').trim().toLowerCase(),parcels:Number(r[7]||1)}))
+      const invalid=importedRows.find(r=>!r.name||!r.phone||!r.area||!r.address||!Number.isFinite(r.amount)||r.amount<0||r.amount>100000||!['cod','prepaid'].includes(r.payment)||!Number.isInteger(r.parcels)||r.parcels<1||r.parcels>100)
+      if(invalid)throw new Error(`خطأ ببيانات السطر ${invalid.line}؛ راجع الاسم والهاتف والمنطقة والعنوان والمبلغ والدفع وعدد القطع`)
+      qs('#storeSheetPreview').innerHTML=`<p class="muted">جاهز لإنشاء ${importedRows.length} أوردر للمحل المختار. أول أوردرات: ${importedRows.slice(0,5).map(r=>esc(r.name)).join('، ')}</p>`
+      qs('#importStoreSheet').disabled=false
+    }catch(x){importedRows=[];qs('#importStoreSheet').disabled=true;qs('#storeSheetPreview').textContent=errText(x);toast(errText(x),'error')}
+  }
+  qs('#importStoreSheet').onclick=async()=>{
+    if(!importedRows.length)return
+    const button=qs('#importStoreSheet'),storeId=qs('#soStore').value
+    button.disabled=true;let created=0;const failed=[]
+    for(const row of importedRows){
+      const {error:e}=await supabase.rpc('store_create_order_auto',{p_store_id:storeId,p_customer_name:row.name,p_customer_phone:row.phone,p_area:row.area,p_address:row.address,p_amount_to_collect:row.payment==='prepaid'?0:row.amount,p_payment_type:row.payment,p_parcel_count:row.parcels,p_priority:'normal',p_notes:row.notes||null})
+      if(e)failed.push(row.line);else created++
+      qs('#storeSheetPreview').textContent=`تم إنشاء ${created} من ${importedRows.length} أوردر...`
+    }
+    qs('#storeSheetPreview').textContent=`تم إنشاء ${created} أوردر${failed.length?` · تعذرت الأسطر ${failed.join('، ')}. صحّح الأسطر المتعثرة فقط وأعد رفعها.`:''}. الإدارة تقدر تطبع كل ملصقاتها.`
+    importedRows=[];toast(`تم إنشاء ${created} أوردر${failed.length?'، وبعض الأسطر تحتاج مراجعة':''}`)
+  }
   qs('#storeOrderForm').onsubmit=async e=>{
     e.preventDefault()
     const b=qs('#storeOrderForm button[type="submit"]')
@@ -582,7 +645,7 @@ async function loadOrders(){
 }
 
 async function editOrder(o){
-  const {data:events}=await supabase.from('order_events').select('event_type,old_status,new_status,created_at,actor_id').eq('order_id',o.id).order('created_at',{ascending:false}).limit(30)
+  const {data:events}=await supabase.from('order_events').select('event_type,old_status,new_status,created_at,actor_id,meta').eq('order_id',o.id).order('created_at',{ascending:false}).limit(30)
   qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>${esc(o.order_code)} · ${esc(storeName(o.store_id))}</h3><button id="backOrders" class="btn btn-ghost">رجوع</button></div>
     <form id="orderEdit" class="form-grid two">
       <div class="field"><label>العنوان</label><input id="eoAddress" value="${esc(o.address)}"></div>
@@ -597,7 +660,7 @@ async function editOrder(o){
       <div class="field"><label>كابتن التوصيل</label><select id="eoCaptain"><option value="">بدون</option>${captains.filter(c=>c.active&&['delivery','both'].includes(c.captain_type)).map(c=>`<option value="${c.id}">${esc(c.profiles?.full_name||c.id)}</option>`).join('')}</select></div>
       <div class="field"><label>&nbsp;</label><button class="btn btn-primary">حفظ التعديلات</button></div>
     </form>${o.status==='returned_warehouse'?`<div class="quick"><button id="returnToStore" class="btn btn-red">تسليم المرتجع للمحل</button><button id="retryDelivery" class="btn btn-blue">إعادة محاولة التوصيل</button></div>`:''}</div>
-    <div class="panel" style="margin-top:14px"><h3>سجل التعديلات</h3><div class="cards">${(events||[]).map(e=>`<div class="card"><b>${esc(e.event_type)}</b><p>${esc(statusLabels[e.old_status]||e.old_status||'—')} ← ${esc(statusLabels[e.new_status]||e.new_status||'—')}</p><small>${new Date(e.created_at).toLocaleString('ar-JO')} · ${esc(profiles.find(p=>p.id===e.actor_id)?.full_name||'النظام')}</small></div>`).join('')||'<div class="empty">لا يوجد تعديلات</div>'}</div></div>`
+    <div class="panel" style="margin-top:14px"><h3>سجل التعديلات</h3><div class="cards">${(events||[]).map(e=>`<div class="card"><b>${esc(e.event_type)}</b><p>${esc(statusLabels[e.old_status]||e.old_status||'—')} ← ${esc(statusLabels[e.new_status]||e.new_status||'—')}</p>${e.meta?.old_amount!==undefined&&Number(e.meta.old_amount)!==Number(e.meta.new_amount)?`<p>المبلغ: ${money(e.meta.old_amount)} ← ${money(e.meta.new_amount)}</p>`:''}${e.meta?.old_captain!==undefined&&e.meta.old_captain!==e.meta.new_captain?`<p>الكابتن: ${esc(captainName(e.meta.old_captain))} ← ${esc(captainName(e.meta.new_captain))}</p>`:''}<small>${new Date(e.created_at).toLocaleString('ar-JO')} · ${esc(profiles.find(p=>p.id===e.actor_id)?.full_name||'النظام')}</small></div>`).join('')||'<div class="empty">لا يوجد تعديلات</div>'}</div></div>`
   qs('#eoPayment').value=o.payment_type||'cod';qs('#eoPriority').value=o.priority||'normal';qs('#eoRun').value=o.delivery_run||'evening';qs('#eoCaptain').value=o.delivery_captain_id||''
   qs('#backOrders').onclick=renderOrders
   if(o.status==='returned_warehouse'){
@@ -734,13 +797,40 @@ async function renderAssign(){
   const delivery=captains.filter(c=>c.active && c.available_today && ['delivery','both'].includes(c.captain_type))
   const pickup=captains.filter(c=>c.active && ['pickup','both'].includes(c.captain_type))
   qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>توزيع أوردرات التوصيل</h3><span class="muted">${orders.length} أوردر جاهز</span></div>
-    <div class="form-grid"><div class="field"><label>كابتن التوصيل</label><select id="deliveryCaptain">${delivery.map(c=>`<option value="${c.id}">${esc(c.profiles?.full_name||c.profiles?.phone||c.id)} (حد ${c.daily_capacity||30})</option>`).join('')}</select></div><div class="field"><label>دفعة التوزيع</label><select id="assignRun"><option value="evening">مسائية</option><option value="morning">صباحية</option></select></div><div class="field"><label>المنطقة</label><select id="assignArea"><option value="">كل المناطق</option>${[...new Set(orders.map(o=>o.area))].sort().map(a=>`<option>${esc(a)}</option>`).join('')}</select></div><div class="field"><label>&nbsp;</label><button id="assignSelected" class="btn btn-primary">توزيع المحدد</button></div></div>
+    <div class="form-grid"><div class="field"><label>كابتن التوصيل</label><select id="deliveryCaptain">${delivery.map(c=>`<option value="${c.id}">${esc(c.profiles?.full_name||c.profiles?.phone||c.id)} (حد ${c.daily_capacity||30})</option>`).join('')}</select></div><div class="field"><label>دفعة التوزيع</label><select id="assignRun"><option value="evening">مسائية</option><option value="morning">صباحية</option></select></div><div class="field"><label>المنطقة</label><select id="assignArea"><option value="">كل المناطق</option>${[...new Set(orders.map(o=>o.area))].sort().map(a=>`<option>${esc(a)}</option>`).join('')}</select></div><div class="field"><label>&nbsp;</label><button id="assignSelected" class="btn btn-primary">توزيع المحدد</button></div><div class="field"><label>&nbsp;</label><button id="autoAssign" class="btn btn-blue">توزيع تلقائي حسب المنطقة والحمولة</button></div></div>
     <div class="table-wrap"><table class="table"><thead><tr><th>تحديد</th><th>الأوردر</th><th>المحل</th><th>المنطقة</th><th>المبلغ</th></tr></thead><tbody>${orders.sort((a,b)=>(b.priority==='urgent')-(a.priority==='urgent')||a.area.localeCompare(b.area)).map(o=>`<tr class="assign-row" data-area="${esc(o.area)}"><td><input class="check assign-check" type="checkbox" value="${o.id}"></td><td>${esc(o.order_code)} ${o.priority==='urgent'?'⚡':''}</td><td>${esc(storeName(o.store_id))}</td><td>${esc(o.area)}</td><td>${money(o.amount_to_collect)}</td></tr>`).join('')||'<tr><td colspan="5">لا يوجد أوردرات جاهزة</td></tr>'}</tbody></table></div>
   </div>
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>توزيع جلب من المحلات</h3><span class="muted">اختياري</span></div>
     <div class="form-grid"><div class="field"><label>كابتن الجلب</label><select id="pickupCaptain">${pickup.map(c=>`<option value="${c.id}">${esc(c.profiles?.full_name||c.profiles?.phone||c.id)}</option>`).join('')}</select></div><div class="field"><label>رقم الأوردر</label><input id="pickupOrder" placeholder="DO-000001"></div><div class="field"><label>&nbsp;</label><button id="assignPickup" class="btn btn-blue">تعيين للجلب</button></div></div>
   </div>`
   qs('#assignArea').onchange=()=>qsa('.assign-row').forEach(row=>row.classList.toggle('hidden',!!qs('#assignArea').value&&row.dataset.area!==qs('#assignArea').value))
+  qs('#autoAssign').onclick=async()=>{
+    if(!delivery.length)return toast('لا يوجد كباتن توصيل متاحون اليوم','error')
+    const checked=qsa('.assign-check:checked').map(x=>x.value)
+    const selected=(checked.length?orders.filter(o=>checked.includes(o.id)):orders.filter(o=>!qs('#assignArea').value||o.area===qs('#assignArea').value))
+    if(!selected.length)return toast('لا توجد أوردرات جاهزة للتوزيع','error')
+    const counts=await Promise.all(delivery.map(c=>supabase.from('orders').select('id',{count:'exact',head:true}).eq('delivery_captain_id',c.id).in('status',['assigned','out_for_delivery','postponed','no_answer'])))
+    if(counts.some(x=>x.error))return toast(errText(counts.find(x=>x.error).error),'error')
+    const slots=delivery.map((c,i)=>({id:c.id,name:c.profiles?.full_name||c.id,remaining:Math.max(0,(c.daily_capacity||30)-(counts[i].count||0)),load:counts[i].count||0}))
+    const planned=[],areas=new Map()
+    for(const o of [...selected].sort((a,b)=>String(a.area).localeCompare(String(b.area),'ar')||(b.priority==='urgent')-(a.priority==='urgent'))){
+      const same=areas.get(o.area),candidate=slots.find(c=>c.id===same&&c.remaining>0)||[...slots].filter(c=>c.remaining>0).sort((a,b)=>a.load-b.load||b.remaining-a.remaining)[0]
+      if(!candidate)break
+      candidate.remaining--;candidate.load++;areas.set(o.area,candidate.id);planned.push({order:o,captain:candidate})
+    }
+    if(!planned.length)return toast('كل الكباتن وصلوا للحد اليومي','error')
+    const recap=delivery.map(c=>`${c.profiles?.full_name||c.id}: ${planned.filter(p=>p.captain.id===c.id).length}`).join('، ')
+    if(!confirm(`توزيع ${planned.length} من ${selected.length} أوردر؟ ${recap}`))return
+    const button=qs('#autoAssign');button.disabled=true;let done=0,failed=[]
+    for(const item of planned){
+      const r=await supabase.rpc('staff_assign_order',{p_order_id:item.order.id,p_captain_id:item.captain.id})
+      if(r.error){failed.push(item.order.order_code);continue}
+      done++
+      const {error:runError}=await supabase.from('orders').update({delivery_run:qs('#assignRun').value}).eq('id',item.order.id)
+      if(runError)failed.push(`${item.order.order_code} (دفعة التوزيع)`)
+    }
+    toast(`توزّع ${done} أوردر${failed.length?`؛ راجع ${failed.join('، ')}`:''}`,failed.length?'error':'ok');renderAssign()
+  }
   qs('#assignSelected').onclick=async()=>{
     const ids=qsa('.assign-check:checked').map(x=>x.value),captain_id=qs('#deliveryCaptain').value
     if(!ids.length)return toast('حدد أوردر واحد على الأقل','error')
@@ -824,7 +914,7 @@ async function renderUsers(){
   qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>إنشاء حساب جديد</h3><span class="muted">من الإدارة فقط</span></div>
     <form id="userForm" class="form-grid two">
       <div class="field"><label>الاسم الكامل</label><input id="uName" required></div>
-      <div class="field"><label>نوع الحساب</label><select id="uRole"><option value="delivery_captain">كابتن توصيل</option><option value="pickup_captain">كابتن جلب</option><option value="store_owner">صاحب محل</option></select></div>
+      <div class="field"><label>نوع الحساب</label><select id="uRole"><option value="delivery_captain">كابتن توصيل</option><option value="pickup_captain">كابتن جلب</option><option value="store_owner">صاحب محل</option><option value="accountant">محاسب</option></select></div>
       <div class="field"><label>طريقة الدخول</label><select id="uType"><option value="phone">رقم هاتف</option><option value="username">اسم مستخدم</option></select></div>
       <div class="field"><label id="uLoginLabel">رقم الهاتف</label><input id="uLogin" required placeholder="0791234567"></div>
       <div class="field"><label>كلمة السر</label><input id="uPassword" type="password" minlength="6" required></div>
@@ -877,18 +967,29 @@ function manageUser(u){
 
 async function renderAccounts(){
   await loadCommon()
-  const [{data:sb,error:e1},{data:cb,error:e2},{data:overview,error:e3},{data:closures,error:e4},{data:expenses,error:e5},{data:handovers,error:e6}] = await Promise.all([
+  const dayStart=new Date(`${accountingDate}T00:00:00+03:00`),dayEnd=new Date(dayStart.getTime()+86400000)
+  const [{data:sb,error:e1},{data:cb,error:e2},{data:overview,error:e3},{data:closures,error:e4},{data:expenses,error:e5},{data:handovers,error:e6},{data:dailyDelivered,error:e7},{data:dailyHandovers,error:e8},{data:dailyReturns,error:e9}] = await Promise.all([
     supabase.from('store_balance_summary').select('*').order('store_name'),
     supabase.from('captain_cash_summary').select('*'),
     supabase.rpc('accounting_overview',{p_day:accountingDate}),
     supabase.from('accounting_closures').select('*').order('business_date',{ascending:false}).limit(30),
     supabase.from('accounting_expenses').select('amount,category,note,spent_at,method').order('spent_at',{ascending:false}).limit(20),
-    supabase.from('captain_handovers').select('captain_id,amount,handed_over_at,method').order('handed_over_at',{ascending:false}).limit(20)
+    supabase.from('captain_handovers').select('id,captain_id,amount,handed_over_at,method').order('handed_over_at',{ascending:false}).limit(20),
+    supabase.from('orders').select('delivery_captain_id,store_id,area,amount_to_collect,delivery_fee').eq('status','delivered').gte('delivered_at',dayStart.toISOString()).lt('delivered_at',dayEnd.toISOString()).limit(5000),
+    supabase.from('captain_handovers').select('captain_id,amount').gte('handed_over_at',dayStart.toISOString()).lt('handed_over_at',dayEnd.toISOString()).limit(5000),
+    supabase.from('orders').select('store_id,area,return_fee').eq('status','returned_store').gte('returned_at',dayStart.toISOString()).lt('returned_at',dayEnd.toISOString()).limit(5000)
   ])
-  if(e1||e2||e3||e4||e5||e6)throw e1||e2||e3||e4||e5||e6
+  if(e1||e2||e3||e4||e5||e6||e7||e8||e9)throw e1||e2||e3||e4||e5||e6||e7||e8||e9
   const closed=(closures||[]).find(x=>x.business_date===accountingDate)
   const changedAfterClose=closed&&['orders_cash','handovers_cash','store_payouts','expenses','fees_earned'].some(k=>Number(closed[k])!==Number(overview[k]))
   const expenseNames={salary:'رواتب',fuel:'وقود',warehouse:'مخزن',other:'أخرى'}
+  const sum=(rows,key)=>rows.reduce((n,x)=>n+Number(x[key]||0),0)
+  const feesBy=(key)=>{
+    const totals=new Map()
+    for(const o of dailyDelivered||[])totals.set(o[key]||'—',(totals.get(o[key]||'—')||0)+Number(o.delivery_fee||0))
+    for(const o of dailyReturns||[])totals.set(o[key]||'—',(totals.get(o[key]||'—')||0)+Number(o.return_fee||0))
+    return [...totals].sort((a,b)=>b[1]-a[1])
+  }
   const day=accountingDate
   qs('#content').innerHTML=`<div class="panel accounting-head"><div class="panel-head"><div><span class="eyebrow">DROP OFF MANAGEMENT · الحسابات</span><h3>جرد الإدارة والمحاسب</h3></div><div class="field"><label for="accountingDate">تاريخ الجرد</label><input id="accountingDate" type="date" value="${esc(day)}"></div></div>
     <div class="accounting-stats">${stat('الكاش عند المحاسب الآن',money(overview.accountant_cash))}${stat('عهدة الكباتن الآن',money(overview.captain_outstanding))}${stat('استلام كاش في اليوم',money(overview.handovers_cash))}${stat('رسوم اليوم',money(overview.fees_earned))}${stat('مصاريف اليوم',money(overview.expenses))}${stat('ربح التشغيل لليوم',money(overview.operating_profit))}</div>
@@ -898,8 +999,12 @@ async function renderAccounts(){
   </div>
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>حسابات المحلات</h3><button id="weeklyStatement" class="btn btn-blue">تنزيل كشف الأسبوع CSV</button></div><div class="cards">${(sb||[]).map(x=>`<div class="card"><h4>${esc(x.store_name)}</h4><p>تم التسليم: ${x.delivered_orders||0} · مرتجع: ${x.returned_orders||0}</p><p>تحصيلات: ${money(x.collections)}</p><p>رسوم: ${money(Number(x.delivery_fees||0)+Number(x.return_fees||0))}</p><p>تم الدفع: ${money(x.paid_out)}</p><div class="money">${money(x.balance_due)}</div><button class="btn btn-sm btn-green settle-store" data-id="${x.store_id}">تسجيل دفعة</button></div>`).join('')||'<div class="empty">لا توجد بيانات</div>'}</div></div>
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>عهدة الكباتن</h3></div><div class="cards">${(cb||[]).map(x=>`<div class="card"><h4>${esc(x.full_name||'كابتن')}</h4><p>تحصيل: ${money(x.cash_collected)}</p><p>سلّم: ${money(x.cash_handed_over)}</p><div class="money">${money(x.cash_due)}</div><button class="btn btn-sm btn-blue handover" data-id="${x.captain_id}">تسجيل تسليم كاش</button></div>`).join('')||'<div class="empty">لا يوجد كباتن</div>'}</div></div>`
+  const insights=document.createElement('div');insights.className='accounting-ledger'
+  insights.innerHTML=`<div class="panel"><div class="panel-head"><h3>مطابقة كل كابتن · ${esc(day)}</h3></div>${(cb||[]).map(c=>{const delivered=sum((dailyDelivered||[]).filter(x=>x.delivery_captain_id===c.captain_id),'amount_to_collect'),handed=sum((dailyHandovers||[]).filter(x=>x.captain_id===c.captain_id),'amount');return `<div class="ledger-row"><span>${esc(c.full_name||'كابتن')}<small class="muted"> · تحصيل اليوم ${money(delivered)} · سلّم اليوم ${money(handed)} · عهدته الآن ${money(c.cash_due)}</small></span><b>${Number(c.cash_due)>0?'نقص '+money(c.cash_due):'مُصفّى'}</b></div>`}).join('')||'<div class="empty">لا يوجد كباتن</div>'}</div>
+  <div class="panel"><div class="panel-head"><h3>رسوم اليوم حسب المحل والمنطقة</h3></div><h4>المحلات</h4>${feesBy('store_id').map(([id,amount])=>`<div class="ledger-row"><span>${esc(stores.find(s=>s.id===id)?.name||'—')}</span><b>${money(amount)}</b></div>`).join('')||'<p class="muted">لا توجد رسوم اليوم</p>'}<h4>المناطق</h4>${feesBy('area').map(([area,amount])=>`<div class="ledger-row"><span>${esc(area)}</span><b>${money(amount)}</b></div>`).join('')||'<p class="muted">لا توجد مناطق اليوم</p>'}</div>`
+  qs('#content').append(insights)
   const ledger=document.createElement('div');ledger.className='accounting-ledger'
-  ledger.innerHTML=`<div class="panel"><div class="panel-head"><h3>تسليمات الكباتن للمحاسب</h3></div>${(handovers||[]).map(x=>`<div class="ledger-row"><span>${esc(captainName(x.captain_id))} · ${new Date(x.handed_over_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})}</span><b>${money(x.amount)}</b></div>`).join('')||'<div class="empty">لا توجد تسليمات</div>'}</div>
+  ledger.innerHTML=`<div class="panel"><div class="panel-head"><h3>تسليمات الكباتن للمحاسب</h3></div>${(handovers||[]).map(x=>`<div class="ledger-row"><span>${esc(captainName(x.captain_id))} · ${new Date(x.handed_over_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})}<small class="muted"> · إيصال ${esc(x.id.slice(0,8).toUpperCase())}</small></span><b>${money(x.amount)}</b></div>`).join('')||'<div class="empty">لا توجد تسليمات</div>'}</div>
   <div class="panel"><div class="panel-head"><h3>مصاريف التشغيل</h3></div><form id="expenseForm" class="form-grid two"><div class="field"><label>النوع</label><select id="expenseCategory"><option value="salary">رواتب</option><option value="fuel">وقود</option><option value="warehouse">مخزن</option><option value="other">أخرى</option></select></div><div class="field"><label>المبلغ</label><input id="expenseAmount" type="number" min="0.01" step="0.01" required></div><div class="field"><label>الدفع</label><select id="expenseMethod"><option value="cash">نقداً</option><option value="bank">تحويل</option></select></div><div class="field"><label>تفاصيل</label><input id="expenseNote" maxlength="200" placeholder="مثال: وقود سيارة التوصيل"></div><button type="submit" class="btn btn-blue">تسجيل المصروف</button></form>${(expenses||[]).map(x=>`<div class="ledger-row"><span>${esc(expenseNames[x.category]||x.category)} · ${esc(x.note||'')} · ${x.method==='bank'?'تحويل':'نقداً'}</span><b>${money(x.amount)}</b></div>`).join('')}</div></div>
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>أرشيف التسكير</h3></div>${(closures||[]).map(x=>`<div class="ledger-row"><span>${esc(x.business_date)} · الربح ${money(x.operating_profit)} · ${Number(x.cash_shortage)>=0?'نقص':'زيادة'} ${money(Math.abs(Number(x.cash_shortage)))}</span><b>الصندوق ${money(x.counted_cash)}</b></div>`).join('')||'<div class="empty">لا يوجد تسكير مسجّل بعد</div>'}</div>`
   qs('#content').append(ledger)
@@ -947,9 +1052,12 @@ async function renderAccounts(){
   }
 }
 function downloadOrdersCsv(orders,filename){
-  const csvCell=v=>{const value=String(v??'');return '"'+(/^[=+@\-\t\r]/.test(value)?"'":'')+value.replaceAll('"','""')+'"'}
   const header=['الطلب','المحل','الزبون','الهاتف','المنطقة','الحالة','الدفع','مبلغ الطلب','رسوم التوصيل','رسوم المرتجع','عدد القطع','الكابتن','التاريخ']
   const rows=orders.map(o=>[o.order_code,storeName(o.store_id),o.customer_name,o.customer_phone,o.area,statusLabels[o.status],o.payment_type==='prepaid'?'مدفوع مسبقاً':'عند التسليم',o.amount_to_collect,o.delivery_fee,o.return_fee,o.parcel_count,captainName(o.delivery_captain_id),o.created_at])
+  downloadCsv(header,rows,filename)
+}
+function downloadCsv(header,rows,filename){
+  const csvCell=v=>{const value=String(v??'');return '"'+(/^[=+@\-\t\r]/.test(value)?"'":'')+value.replaceAll('"','""')+'"'}
   const blob=new Blob(['\ufeff'+[header,...rows].map(row=>row.map(csvCell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'})
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
 }
@@ -964,30 +1072,36 @@ async function renderCaptain(){
   let q=supabase.from('orders').select('*').order('created_at',{ascending:false})
   q=pickup?q.eq('pickup_captain_id',profile.id):q.eq('delivery_captain_id',profile.id)
   if(!pickup)q=q.not('status','in','("delivered","returned_store","cancelled")')
-  const [{data,error},cashResult,deliveredResult,handoversResult]=await Promise.all([
+  const [{data,error},cashResult,deliveredResult,handoversResult,todayResult]=await Promise.all([
     q,
     pickup?Promise.resolve(null):supabase.from('captain_cash_summary').select('cash_collected,cash_handed_over,cash_due').eq('captain_id',profile.id).maybeSingle(),
     pickup?Promise.resolve(null):supabase.from('orders').select('order_code,amount_to_collect,delivered_at').eq('delivery_captain_id',profile.id).eq('status','delivered').eq('payment_type','cod').order('delivered_at',{ascending:false}).limit(8),
-    pickup?Promise.resolve(null):supabase.from('captain_handovers').select('amount,handed_over_at').eq('captain_id',profile.id).order('handed_over_at',{ascending:false}).limit(8)
+    pickup?Promise.resolve(null):supabase.from('captain_handovers').select('id,amount,method,handed_over_at').eq('captain_id',profile.id).order('handed_over_at',{ascending:false}).limit(5000),
+    pickup?Promise.resolve(null):supabase.from('orders').select('id',{count:'exact',head:true}).eq('delivery_captain_id',profile.id).eq('status','delivered').gte('delivered_at',new Date(`${accountingDate}T00:00:00+03:00`).toISOString()).lt('delivered_at',new Date(new Date(`${accountingDate}T00:00:00+03:00`).getTime()+86400000).toISOString())
   ])
   if(error)throw error
-  if(cashResult?.error||deliveredResult?.error||handoversResult?.error)throw cashResult?.error||deliveredResult?.error||handoversResult?.error
+  if(cashResult?.error||deliveredResult?.error||handoversResult?.error||todayResult?.error)throw cashResult?.error||deliveredResult?.error||handoversResult?.error||todayResult?.error
   const cash=cashResult?.data
   const due=Number(cash?.cash_due||0)
   const date=v=>v?new Date(v).toLocaleDateString('ar-JO',{timeZone:'Asia/Amman'}):'—'
+  const grouped=[...(data||[])].sort((a,b)=>String(a.area||'').localeCompare(String(b.area||''),'ar')||(b.priority==='urgent')-(a.priority==='urgent'))
+  let lastArea=''
   const finance=pickup?'':`<div class="panel captain-finance"><div class="panel-head"><h3>💰 حسابي مع الشركة</h3><span class="muted">الأوردرات المسلّمة والمدفوعة نقداً فقط</span></div>
     <div class="captain-cash-summary">${stat('حصّلت من الزبائن',money(cash?.cash_collected))}${stat('سلّمت للشركة',money(cash?.cash_handed_over))}${stat(due<0?'رصيد لصالحك':'المطلوب تسليمه للشركة',money(Math.abs(due)))}</div>
     <p class="muted">المبلغ المطلوب = تحصيلات الأوردرات المسلّمة − دفعات الكاش المسجّلة من الإدارة. الأوردرات المدفوعة مسبقاً والمرتجعة لا تدخل بالحسبة.</p>
-    <details class="cash-details"><summary>تفاصيل آخر التحصيلات والتسليمات</summary><div class="cash-history"><div><h4>أوردرات تم تحصيلها</h4>${(deliveredResult.data||[]).map(o=>`<p>${esc(o.order_code)} · ${date(o.delivered_at)} <strong>${money(o.amount_to_collect)}</strong></p>`).join('')||'<p>لا يوجد تحصيلات مسجّلة</p>'}</div><div><h4>دفعات سلّمتها للشركة</h4>${(handoversResult.data||[]).map(h=>`<p>${date(h.handed_over_at)} <strong>${money(h.amount)}</strong></p>`).join('')||'<p>لا يوجد دفعات مسجّلة</p>'}</div></div></details>
+    <details class="cash-details"><summary>تفاصيل آخر التحصيلات والتسليمات</summary><div class="cash-history"><div><h4>أوردرات تم تحصيلها</h4>${(deliveredResult.data||[]).map(o=>`<p>${esc(o.order_code)} · ${date(o.delivered_at)} <strong>${money(o.amount_to_collect)}</strong></p>`).join('')||'<p>لا يوجد تحصيلات مسجّلة</p>'}</div><div><h4>دفعات سلّمتها للشركة</h4>${(handoversResult.data||[]).slice(0,20).map(h=>`<p>${date(h.handed_over_at)} · إيصال ${esc(h.id.slice(0,8).toUpperCase())} <strong>${money(h.amount)}</strong></p>`).join('')||'<p>لا يوجد دفعات مسجّلة</p>'}<button id="captainCashCsv" class="btn btn-sm btn-ghost" type="button">تنزيل كشف التسليمات CSV</button></div></div></details>
   </div>`
   qs('#content').innerHTML=`<div class="captain-header"><div><span class="eyebrow">${pickup?'PICKUP CAPTAIN':'DELIVERY CAPTAIN'}</span><h3>مرحباً ${esc(profile.full_name||'كابتن')} 👋</h3></div><span class="badge blue">${data.length} أوردر</span></div>
   ${finance}
-  <div>${!data.length?'<div class="panel"><div class="empty fancy-empty">🛵<strong>ما عندك أوردرات حالياً</strong><span>الأوردرات الجديدة تظهر هون.</span></div></div>':data.map(o=>{
+  ${pickup?'':`<div class="captain-route-summary">${stat('باقي للتوصيل',grouped.filter(o=>!['returned_warehouse','returned_store'].includes(o.status)).length)}${stat('تم التسليم اليوم',todayResult.count||0)}${stat('مرتجع للمخزن',grouped.filter(o=>o.status==='returned_warehouse').length)}${stat('مبالغ عند التسليم',money(grouped.filter(o=>o.payment_type==='cod'&&!['returned_warehouse','returned_store'].includes(o.status)).reduce((n,o)=>n+Number(o.amount_to_collect||0),0)))}</div>`}
+  <div>${!data.length?'<div class="panel"><div class="empty fancy-empty">🛵<strong>ما عندك أوردرات حالياً</strong><span>الأوردرات الجديدة تظهر هون.</span></div></div>':grouped.map(o=>{
     const wp=normalizeJordanPhone(o.customer_phone||'').replace(/\D/g,'')
-    return `<div class="captain-order"><div class="head"><div><h4>${esc(o.order_code)} — ${esc(o.area)} ${o.priority==='urgent'?'⚡':''}</h4><p>${esc(o.customer_name)} | ${esc(o.customer_phone)}</p><p>${esc(o.address)}</p><p>${esc(o.parcel_count||1)} قطعة · ${o.payment_type==='prepaid'?'مدفوع مسبقاً':'تحصيل عند التسليم'} · ${o.delivery_run==='morning'?'صباحي':'مسائي'}</p><p class="muted">${esc(o.notes||'')}</p></div><div class="price">${o.payment_type==='prepaid'?'0.00 د.أ':money(o.amount_to_collect)}</div></div><div class="quick">
+    const area=String(o.area||'غير محدد'),heading=area!==lastArea?`<h4 class="route-area">📍 ${esc(area)}</h4>`:'';lastArea=area
+    return `${heading}<div class="captain-order"><div class="head"><div><h4>${esc(o.order_code)} — ${esc(o.area)} ${o.priority==='urgent'?'⚡':''}</h4><p>${esc(o.customer_name)} | ${esc(o.customer_phone)}</p><p>${esc(o.address)}</p><p>${esc(o.parcel_count||1)} قطعة · ${o.payment_type==='prepaid'?'مدفوع مسبقاً':'تحصيل عند التسليم'} · ${o.delivery_run==='morning'?'صباحي':'مسائي'}</p><p class="muted">${esc(o.notes||'')}</p></div><div class="price">${o.payment_type==='prepaid'?'0.00 د.أ':money(o.amount_to_collect)}</div></div><div class="quick">
       <a class="btn btn-sm btn-blue" href="tel:${esc(o.customer_phone)}">📞 اتصال</a><a class="btn btn-sm btn-green" href="https://wa.me/${wp}" target="_blank">واتساب</a><a class="btn btn-sm btn-ghost" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((o.address||'')+' '+(o.area||''))}" target="_blank">📍 خريطة</a>
       ${pickup?`<button class="btn btn-sm btn-primary pickup-received" data-id="${o.id}">وصل للمخزن</button>`:`<button class="btn btn-sm btn-primary cap-status" data-id="${o.id}" data-st="delivered">تم التسليم</button><button class="btn btn-sm btn-ghost cap-status" data-id="${o.id}" data-st="out_for_delivery">بالطريق</button><button class="btn btn-sm btn-ghost cap-status" data-id="${o.id}" data-st="postponed">مؤجل</button><button class="btn btn-sm btn-ghost cap-status" data-id="${o.id}" data-st="no_answer">لا يرد</button><button class="btn btn-sm btn-red cap-status" data-id="${o.id}" data-st="returned_warehouse">إرجاع للمخزن</button>`}
     </div></div>`}).join('')}</div>`
+  if(!pickup)qs('#captainCashCsv').onclick=()=>downloadCsv(['رقم الإيصال','التاريخ','المبلغ','طريقة الاستلام'],(handoversResult.data||[]).map(h=>[h.id,h.handed_over_at,h.amount,h.method||'cash']),`dropoff-captain-handovers-${accountingDate}.csv`)
   qsa('.cap-status').forEach(b=>b.onclick=async()=>{const r=await supabase.rpc('captain_set_order_status',{p_order_id:b.dataset.id,p_status:b.dataset.st,p_note:null});if(r.error)return toast(errText(r.error),'error');toast('تم تحديث الحالة');renderCaptain()})
   qsa('.pickup-received').forEach(b=>b.onclick=async()=>{const r=await supabase.rpc('pickup_confirm_warehouse',{p_order_id:b.dataset.id});if(r.error)return toast(errText(r.error),'error');toast('تم تأكيد وصول الأوردر للمخزن');renderCaptain()})
 }
@@ -1014,11 +1128,27 @@ async function renderOwner(){
   const button=document.createElement('button');button.className='btn btn-blue';button.textContent='تنزيل كشف طلباتي CSV'
   button.onclick=()=>downloadOrdersCsv(orders,`dropoff-store-${new Date().toISOString().slice(0,10)}.csv`)
   panel.querySelector('.panel-head').append(button)
+  const weekly=document.createElement('button');weekly.className='btn btn-ghost';weekly.textContent='كشف حساب آخر 7 أيام CSV'
+  weekly.onclick=async()=>{
+    const since=new Date(Date.now()-7*86400000).toISOString(),ids=ownedStores.map(s=>s.id)
+    const [{data:delivered,error:e1},{data:returns,error:e2},{data:payouts,error:e3}]=await Promise.all([
+      supabase.from('orders').select('order_code,store_id,delivered_at,amount_to_collect,payment_type,delivery_fee').in('store_id',ids).eq('status','delivered').gte('delivered_at',since).limit(5000),
+      supabase.from('orders').select('order_code,store_id,returned_at,return_fee').in('store_id',ids).eq('status','returned_store').gte('returned_at',since).limit(5000),
+      supabase.from('store_settlements').select('store_id,amount,created_at').in('store_id',ids).gte('created_at',since).limit(5000)
+    ])
+    if(e1||e2||e3)return toast(errText(e1||e2||e3),'error')
+    const name=id=>ownedStores.find(s=>s.id===id)?.name||'—'
+    const rows=[...(delivered||[]).map(o=>['تسليم',o.delivered_at,o.order_code,name(o.store_id),o.payment_type==='cod'?o.amount_to_collect:0,o.delivery_fee,0,0]),...(returns||[]).map(o=>['مرتجع',o.returned_at,o.order_code,name(o.store_id),0,0,o.return_fee,0]),...(payouts||[]).map(x=>['دفعة للمحل',x.created_at,'',name(x.store_id),0,0,0,x.amount])].sort((a,b)=>String(a[1]).localeCompare(String(b[1])))
+    rows.push(['الإجمالي','','','',rows.reduce((n,r)=>n+Number(r[4]||0),0),rows.reduce((n,r)=>n+Number(r[5]||0),0),rows.reduce((n,r)=>n+Number(r[6]||0),0),rows.reduce((n,r)=>n+Number(r[7]||0),0)])
+    downloadCsv(['الحركة','التاريخ','الأوردر','المحل','التحصيل','رسم التوصيل','رسم المرتجع','الدفعات'],rows,`dropoff-store-week-${accountingDate}.csv`)
+  }
+  panel.querySelector('.panel-head').append(weekly)
   qsa('.store-detail').forEach(b=>b.onclick=async()=>{
     const o=orders.find(x=>x.id===b.dataset.id)
     if(!o)return
     const qr=await QRCode.toDataURL(o.order_code,{width:180,margin:1})
-    qs('#storeOrderDetails').innerHTML=`<div class="created-order"><div><span class="badge ${statusClass(o.status)}">${esc(statusLabels[o.status]||o.status)}</span><h3>${esc(o.order_code)} · ${esc(storeName(o.store_id))}</h3><p>${esc(o.customer_name)} · ${esc(o.customer_phone)}</p><p>${esc(o.area)} · ${esc(o.address)}</p><p>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)} · ${esc(o.parcel_count||1)} قطعة</p><p>${esc(o.notes||'')}</p></div><img src="${qr}" alt="QR للطلب ${esc(o.order_code)}"></div>`
+    qs('#storeOrderDetails').innerHTML=`<div class="created-order"><div><span class="badge ${statusClass(o.status)}">${esc(statusLabels[o.status]||o.status)}</span><h3>${esc(o.order_code)} · ${esc(storeName(o.store_id))}</h3><p>${esc(o.customer_name)} · ${esc(o.customer_phone)}</p><p>${esc(o.area)} · ${esc(o.address)}</p><p>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)} · ${esc(o.parcel_count||1)} قطعة</p><p>${esc(o.notes||'')}</p><button id="copyStoreOrder" class="btn btn-sm btn-blue">نسخ بيانات الأوردر لطلب جديد</button></div><img src="${qr}" alt="QR للطلب ${esc(o.order_code)}"></div>`
+    qs('#copyStoreOrder').onclick=()=>{pendingStoreCopy=o;openTab('store_new')}
     qs('#storeOrderDetails').scrollIntoView({behavior:'smooth',block:'nearest'})
   })
 }
