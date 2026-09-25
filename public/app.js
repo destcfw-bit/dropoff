@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 22009)
-Total output lines: 973
-
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/+esm'
 import QRCode from 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm'
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.js'
@@ -295,7 +292,7 @@ async function renderStickers(){
   const draw=()=>{
     const storeId=qs('#labelStore').value,search=qs('#labelSearch').value.trim().toLowerCase()
     const shown=orders.filter(o=>(!storeId||o.store_id===storeId)&&(!search||[o.order_code,o.customer_name,o.customer_phone].some(v=>String(v||'').toLowerCase().includes(search))))
-    qs('#labelOrders').innerHTML=`<div class="table-wrap"><table class="table"><thead><tr><th>تحديد</th><th>رقم الطلب</th><th>المحل</th><th>الزبون</th><th>المنطقة</th><th>الكابتن</th><th>الحالة</th><th>طباعة</th></tr></thead><tbody>${shown.map(o=>`<tr><td><input type="checkbox" class="check label-check" value="${o.id}" aria-label="تحديد ${esc(o.order_code)}"></td><td><strong>${esc(o.order_code)}</strong></td><td>${esc(storeName(o.store_id))}</td><td>${esc(o.customer_name)}</td><td>${esc(o.area)}</td><td>${esc(labelCaptain(o))}</td><td>${esc(statusLabels[o.status]||o.status)}</td><td><button class="btn btn-sm btn-blue label-print" data-id="${o.id}">طباعة الملصق</button></td></tr>`).join('')||'<tr><td colspan="8">لا توجد طلبات مطابقة</td></tr>'}</tbody></table></div>`
+    qs('#labelOrders').innerHTML=`<div class="table-wrap"><table class="table"><thead><tr><th>تحديد</th><th>رقم الطلب</th><th>المحل</th><th>الزبون</th><th>المنطقة</th><th>الحالة</th><th>طباعة</th></tr></thead><tbody>${shown.map(o=>`<tr><td><input type="checkbox" class="check label-check" value="${o.id}" aria-label="تحديد ${esc(o.order_code)}"></td><td><strong>${esc(o.order_code)}</strong></td><td>${esc(storeName(o.store_id))}</td><td>${esc(o.customer_name)}</td><td>${esc(o.area)}</td><td>${esc(statusLabels[o.status]||o.status)}</td><td><button class="btn btn-sm btn-blue label-print" data-id="${o.id}">طباعة الملصق</button></td></tr>`).join('')||'<tr><td colspan="7">لا توجد طلبات مطابقة</td></tr>'}</tbody></table></div>`
     qsa('.label-print').forEach(b=>b.onclick=()=>printQr(orders.find(o=>o.id===b.dataset.id)))
   }
   qs('#labelStore').onchange=draw
@@ -316,7 +313,7 @@ async function renderStickers(){
     try{
       const all=[]
       for(let offset=0;;offset+=500){
-        let query=supabase.from('orders').select('id,order_code,store_id,customer_name,customer_phone,area,address,amount_to_collect,payment_type,parcel_count,priority,pickup_captain_id,delivery_captain_id,created_at')
+        let query=supabase.from('orders').select('id,order_code,store_id,customer_name,customer_phone,area,address,amount_to_collect,payment_type,parcel_count,priority,created_at')
           .order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+499)
         if(storeId)query=query.eq('store_id',storeId)
         const {data:page,error:pageError}=await query
@@ -510,16 +507,10 @@ function qrLabel(o,qr){
       <div><strong>المحل</strong><span>${esc(storeName(o.store_id))}</span></div>
       <div><strong>الزبون</strong><span>${esc(o.customer_name)} · ${esc(o.customer_phone)}</span></div>
       <div><strong>العنوان</strong><span>${esc(o.area)} — ${esc(o.address)}</span></div>
-      <div><strong>الكابتن</strong><span>${esc(labelCaptain(o))}</span></div>
     </div>
     ${o.notes?`<div class="label-note">${esc(o.notes)}</div>`:''}
     <div class="label-foot"><span>${esc(o.parcel_count||1)} قطعة${o.priority==='urgent'?' · مستعجل':''}</span><b>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</b></div>
   </div>`
-}
-function labelCaptain(o){
-  if(o.delivery_captain_id)return captainName(o.delivery_captain_id)
-  if(o.pickup_captain_id)return `${captainName(o.pickup_captain_id)} (جلب)`
-  return 'بانتظار التوزيع'
 }
 async function printWhenReady(w){
   const images=[...w.document.images]
@@ -594,7 +585,7 @@ async function editOrder(o){
       <div class="field"><label>دفعة التوزيع</label><select id="eoRun"><option value="morning">صباحية</option><option value="evening">مسائية</option></select></div>
       <div class="field"><label>رف المخزن</label><input id="eoShelf" value="${esc(o.shelf_location||'')}"></div>
       <div class="field"><label>كابتن التوصيل</label><select id="eoCaptain"><option value="">بدون</option>${captains.filter(c=>c.active&&['delivery','both'].includes(c.captain_type)).map(c=>`<option value="${c.id}">${esc(c.profiles?.full_name||c.id)}</option>`).join('')}</select></div>
-      <div class="field"><label>&nbsp;</label><button class="btn btn-primary">حف…9 tokens truncated…
+      <div class="field"><label>&nbsp;</label><button class="btn btn-primary">حفظ التعديلات</button></div>
     </form>${o.status==='returned_warehouse'?`<div class="quick"><button id="returnToStore" class="btn btn-red">تسليم المرتجع للمحل</button><button id="retryDelivery" class="btn btn-blue">إعادة محاولة التوصيل</button></div>`:''}</div>
     <div class="panel" style="margin-top:14px"><h3>سجل التعديلات</h3><div class="cards">${(events||[]).map(e=>`<div class="card"><b>${esc(e.event_type)}</b><p>${esc(statusLabels[e.old_status]||e.old_status||'—')} ← ${esc(statusLabels[e.new_status]||e.new_status||'—')}</p><small>${new Date(e.created_at).toLocaleString('ar-JO')} · ${esc(profiles.find(p=>p.id===e.actor_id)?.full_name||'النظام')}</small></div>`).join('')||'<div class="empty">لا يوجد تعديلات</div>'}</div></div>`
   qs('#eoPayment').value=o.payment_type||'cod';qs('#eoPriority').value=o.priority||'normal';qs('#eoRun').value=o.delivery_run||'evening';qs('#eoCaptain').value=o.delivery_captain_id||''
