@@ -924,9 +924,24 @@ async function renderCaptain(){
   let q=supabase.from('orders').select('*').order('created_at',{ascending:false})
   q=pickup?q.eq('pickup_captain_id',profile.id):q.eq('delivery_captain_id',profile.id)
   if(!pickup)q=q.not('status','in','("delivered","returned_store","cancelled")')
-  const {data,error}=await q
+  const [{data,error},cashResult,deliveredResult,handoversResult]=await Promise.all([
+    q,
+    pickup?Promise.resolve(null):supabase.from('captain_cash_summary').select('cash_collected,cash_handed_over,cash_due').eq('captain_id',profile.id).maybeSingle(),
+    pickup?Promise.resolve(null):supabase.from('orders').select('order_code,amount_to_collect,delivered_at').eq('delivery_captain_id',profile.id).eq('status','delivered').eq('payment_type','cod').order('delivered_at',{ascending:false}).limit(8),
+    pickup?Promise.resolve(null):supabase.from('captain_handovers').select('amount,handed_over_at').eq('captain_id',profile.id).order('handed_over_at',{ascending:false}).limit(8)
+  ])
   if(error)throw error
+  if(cashResult?.error||deliveredResult?.error||handoversResult?.error)throw cashResult?.error||deliveredResult?.error||handoversResult?.error
+  const cash=cashResult?.data
+  const due=Number(cash?.cash_due||0)
+  const date=v=>v?new Date(v).toLocaleDateString('ar-JO',{timeZone:'Asia/Amman'}):'—'
+  const finance=pickup?'':`<div class="panel captain-finance"><div class="panel-head"><h3>💰 حسابي مع الشركة</h3><span class="muted">الأوردرات المسلّمة والمدفوعة نقداً فقط</span></div>
+    <div class="captain-cash-summary">${stat('حصّلت من الزبائن',money(cash?.cash_collected))}${stat('سلّمت للشركة',money(cash?.cash_handed_over))}${stat(due<0?'رصيد لصالحك':'المطلوب تسليمه للشركة',money(Math.abs(due)))}</div>
+    <p class="muted">المبلغ المطلوب = تحصيلات الأوردرات المسلّمة − دفعات الكاش المسجّلة من الإدارة. الأوردرات المدفوعة مسبقاً والمرتجعة لا تدخل بالحسبة.</p>
+    <details class="cash-details"><summary>تفاصيل آخر التحصيلات والتسليمات</summary><div class="cash-history"><div><h4>أوردرات تم تحصيلها</h4>${(deliveredResult.data||[]).map(o=>`<p>${esc(o.order_code)} · ${date(o.delivered_at)} <strong>${money(o.amount_to_collect)}</strong></p>`).join('')||'<p>لا يوجد تحصيلات مسجّلة</p>'}</div><div><h4>دفعات سلّمتها للشركة</h4>${(handoversResult.data||[]).map(h=>`<p>${date(h.handed_over_at)} <strong>${money(h.amount)}</strong></p>`).join('')||'<p>لا يوجد دفعات مسجّلة</p>'}</div></div></details>
+  </div>`
   qs('#content').innerHTML=`<div class="captain-header"><div><span class="eyebrow">${pickup?'PICKUP CAPTAIN':'DELIVERY CAPTAIN'}</span><h3>مرحباً ${esc(profile.full_name||'كابتن')} 👋</h3></div><span class="badge blue">${data.length} أوردر</span></div>
+  ${finance}
   <div>${!data.length?'<div class="panel"><div class="empty fancy-empty">🛵<strong>ما عندك أوردرات حالياً</strong><span>الأوردرات الجديدة تظهر هون.</span></div></div>':data.map(o=>{
     const wp=normalizeJordanPhone(o.customer_phone||'').replace(/\D/g,'')
     return `<div class="captain-order"><div class="head"><div><h4>${esc(o.order_code)} — ${esc(o.area)} ${o.priority==='urgent'?'⚡':''}</h4><p>${esc(o.customer_name)} | ${esc(o.customer_phone)}</p><p>${esc(o.address)}</p><p>${esc(o.parcel_count||1)} قطعة · ${o.payment_type==='prepaid'?'مدفوع مسبقاً':'تحصيل عند التسليم'} · ${o.delivery_run==='morning'?'صباحي':'مسائي'}</p><p class="muted">${esc(o.notes||'')}</p></div><div class="price">${o.payment_type==='prepaid'?'0.00 د.أ':money(o.amount_to_collect)}</div></div><div class="quick">
