@@ -102,6 +102,7 @@ a{color:inherit}
 .order-row{display:grid;grid-template-columns:38px repeat(5,minmax(95px,1fr));gap:7px;align-items:center;margin:7px 0}.order-row input,.order-row select{min-width:0;background:#081a2a;border:1px solid #27455f;color:#fff;border-radius:10px;padding:9px}.order-row .idx{height:34px;width:34px;border-radius:50%;display:grid;place-items:center;background:#17334e;color:#ffd1ad;font-weight:800}
 .check{width:18px;height:18px;accent-color:var(--orange)}
 .captain-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.captain-header h3{margin:4px 0 0;font-size:24px}
+.captain-finance{margin-bottom:14px}.captain-finance>p{font-size:12px;line-height:1.7}.captain-cash-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.captain-cash-summary .stat b{font-size:23px}.cash-details{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}.cash-details summary{cursor:pointer;color:var(--navy);font-weight:800}.cash-history{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.cash-history h4{margin:12px 0 8px}.cash-history p{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding:8px 0;margin:0;font-size:13px}.cash-history strong{white-space:nowrap}
 .captain-order{background:linear-gradient(145deg,rgba(13,37,58,.96),rgba(7,22,36,.96));border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:10px}.captain-order .head{display:flex;justify-content:space-between;gap:10px}.captain-order h4{margin:0}.captain-order .price{font-size:22px;color:#ffb077;font-weight:900}.captain-order .quick{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.captain-order a{text-decoration:none}
 .owner-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
 .qr-card{text-align:center}.qr-card canvas,.qr-card img{max-width:180px;background:#fff;padding:8px;border-radius:12px}
@@ -109,6 +110,7 @@ a{color:inherit}
 
 @media(max-width:1180px){.stats{grid-template-columns:repeat(3,1fr)}.shell{grid-template-columns:240px 1fr}.cards{grid-template-columns:repeat(2,1fr)}.auth-layout{width:min(920px,100%)}.auth-showcase{padding:38px}.auth-card{padding:46px 38px}}
 @media(max-width:760px){
+  .captain-cash-summary{grid-template-columns:1fr}.cash-history{grid-template-columns:1fr}
   body{padding-bottom:76px;background-attachment:scroll}.shell{display:block}.main{padding:14px 12px 24px}
   .sidebar{position:static;height:auto;padding:0;background:transparent;border:0;display:block}.side-brand,.side-foot{display:none}
   .nav{position:fixed;z-index:90;bottom:0;right:0;left:0;height:72px;padding:7px 7px max(7px,env(safe-area-inset-bottom));display:flex;flex-direction:row;gap:5px;overflow-x:auto;background:rgba(5,15,25,.94);border-top:1px solid rgba(132,175,210,.18);backdrop-filter:blur(20px)}
