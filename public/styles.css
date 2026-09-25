@@ -103,6 +103,7 @@ a{color:inherit}
 .check{width:18px;height:18px;accent-color:var(--orange)}
 .captain-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.captain-header h3{margin:4px 0 0;font-size:24px}
 .captain-finance{margin-bottom:14px}.captain-finance>p{font-size:12px;line-height:1.7}.captain-cash-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.captain-cash-summary .stat b{font-size:23px}.cash-details{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}.cash-details summary{cursor:pointer;color:var(--navy);font-weight:800}.cash-history{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.cash-history h4{margin:12px 0 8px}.cash-history p{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding:8px 0;margin:0;font-size:13px}.cash-history strong{white-space:nowrap}
+.accounting-head .panel-head{align-items:flex-end}.accounting-head .panel-head .field{min-width:175px}.accounting-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.accounting-stats .stat b{font-size:22px}.accounting-head>p{font-size:12px;line-height:1.7}.accounting-close{display:flex;align-items:end;gap:15px;justify-content:space-between;flex-wrap:wrap;padding:15px;border:1px solid var(--line);border-radius:16px;background:#fffaf5}.accounting-close p{margin:5px 0 0}.accounting-close .field{min-width:165px}.accounting-day{padding-top:14px;color:var(--muted);font-size:13px}.accounting-day b{color:var(--navy)}.accounting-ledger{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}.ledger-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 3px;border-bottom:1px solid var(--line);font-size:13px}.ledger-row span{min-width:0;overflow-wrap:anywhere}.ledger-row b{white-space:nowrap}.accounting-ledger .form-grid{margin-bottom:14px}
 .captain-order{background:linear-gradient(145deg,rgba(13,37,58,.96),rgba(7,22,36,.96));border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:10px}.captain-order .head{display:flex;justify-content:space-between;gap:10px}.captain-order h4{margin:0}.captain-order .price{font-size:22px;color:#ffb077;font-weight:900}.captain-order .quick{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.captain-order a{text-decoration:none}
 .owner-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
 .qr-card{text-align:center}.qr-card canvas,.qr-card img{max-width:180px;background:#fff;padding:8px;border-radius:12px}
@@ -110,7 +111,7 @@ a{color:inherit}
 
 @media(max-width:1180px){.stats{grid-template-columns:repeat(3,1fr)}.shell{grid-template-columns:240px 1fr}.cards{grid-template-columns:repeat(2,1fr)}.auth-layout{width:min(920px,100%)}.auth-showcase{padding:38px}.auth-card{padding:46px 38px}}
 @media(max-width:760px){
-  .captain-cash-summary{grid-template-columns:1fr}.cash-history{grid-template-columns:1fr}
+  .captain-cash-summary,.accounting-ledger{grid-template-columns:1fr}.cash-history{grid-template-columns:1fr}.accounting-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.accounting-stats .stat b{font-size:19px}
   body{padding-bottom:76px;background-attachment:scroll}.shell{display:block}.main{padding:14px 12px 24px}
   .sidebar{position:static;height:auto;padding:0;background:transparent;border:0;display:block}.side-brand,.side-foot{display:none}
   .nav{position:fixed;z-index:90;bottom:0;right:0;left:0;height:72px;padding:7px 7px max(7px,env(safe-area-inset-bottom));display:flex;flex-direction:row;gap:5px;overflow-x:auto;background:rgba(5,15,25,.94);border-top:1px solid rgba(132,175,210,.18);backdrop-filter:blur(20px)}
@@ -252,6 +253,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #c65300;outline-offset:3p
   body[data-portal="admin"] .nav{display:none;position:fixed;z-index:55;top:62px;right:0;bottom:0;left:0;width:100%;height:auto;padding:14px 12px max(18px,env(safe-area-inset-bottom));flex-direction:column;gap:6px;overflow-y:auto;overflow-x:hidden;border-top:1px solid var(--line);background:#fff;backdrop-filter:none}
   body[data-portal="admin"] .nav.open{display:flex}
   body[data-portal="admin"] .nav button{width:100%;min-width:0;min-height:48px;flex:none;text-align:right;padding:12px 16px;font-size:15px}
+  body[data-portal="management"]{padding-bottom:82px}
   body[data-portal="store"] .nav button{min-width:0}
   body[data-portal="captain"] .nav button{min-width:0}
   body[data-portal="store"] .nav,body[data-portal="captain"] .nav{height:calc(65px + env(safe-area-inset-bottom));padding-bottom:max(7px,env(safe-area-inset-bottom));overflow-x:hidden}
