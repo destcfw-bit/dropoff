@@ -24,7 +24,8 @@ let currentTab = 'home'
 let accountingDate = new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Amman'})
 
 const roleLabels = {
-  admin:'الإدارة', warehouse:'المخزن', pickup_captain:'كابتن جلب',  delivery_captain:'كابتن توصيل', store_owner:'صاحب محل'
+  admin:'الإدارة', warehouse:'المخزن', pickup_captain:'كابتن جلب',
+  delivery_captain:'كابتن توصيل', store_owner:'صاحب محل'
 }
 const statusLabels = {
   new:'جديد', in_warehouse:'بالمخزن', assigned:'مع الكابتن',
@@ -63,7 +64,8 @@ const portalMeta = {
   management:{title:'رابط الإدارة المالية',roles:['admin']},
   captain:{title:'بوابة الكباتن',roles:['pickup_captain','delivery_captain']},
   store:{title:'بوابة المحلات',roles:['store_owner']}
-}function toast(msg,type='ok'){
+}
+function toast(msg,type='ok'){
   toastEl.textContent=msg
   toastEl.className=`toast show ${type}`
   setTimeout(()=>toastEl.className='toast',2600)
@@ -120,7 +122,8 @@ function renderAuth(){
   const lab=['admin','management'].includes(p)?'اسم المستخدم':'رقم الهاتف أو اسم المستخدم'
   const ph=p==='admin'?'dropoff':'0791234567 أو username'
   const portalLine=p==='admin'?'تحكم كامل بالطلبات والمحلات والكباتن':p==='captain'?'طلباتك ومسارك وحسابك في شاشة واحدة':'تابع طلبات محلك وحساباتك بسهولة'
-  app.innerHTML=`<div class="auth-wrap">    <div class="auth-glow auth-glow-one"></div><div class="auth-glow auth-glow-two"></div>
+  app.innerHTML=`<div class="auth-wrap">
+    <div class="auth-glow auth-glow-one"></div><div class="auth-glow auth-glow-two"></div>
     <div class="auth-layout">
       <section class="auth-showcase">
         <div class="auth-logo"><img src="/assets/logo-transparent.png" alt="Drop Off"></div>
@@ -184,7 +187,8 @@ function navItems(){
     ['assign','⇄ التوزيع'],['operations','📦 العمليات'],['stores','🏪 المحلات'],['users','👥 الحسابات'],['management_link','💰 رابط الإدارة المالية']
   ]
   if(profile.role==='store_owner')return [['store_new','＋ إضافة أوردر'],['owner','▦ طلباتي وحسابي']]
-  return [['captain','▦ أوردراتي']]}
+  return [['captain','▦ أوردراتي']]
+}
 function renderShell(){
   app.innerHTML=`<div class="shell"><aside class="sidebar">
     <div class="side-brand"><img src="/assets/logo-transparent.png"><div><strong>Drop Off</strong><small>${esc(roleLabels[profile.role]||profile.role)}</small></div><span class="live-dot"></span></div>
@@ -199,14 +203,16 @@ function renderShell(){
   qsa('#nav button').forEach(b=>b.onclick=()=>{closeMenu();if(b.dataset.tab==='management_link')location.href='/management';else if(b.dataset.tab==='admin_link')location.href='/admin';else openTab(b.dataset.tab)})
   menu.onclick=()=>{const open=nav.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'إغلاق القائمة':'فتح القائمة');document.body.classList.toggle('menu-open',open)}
   qs('#logout').onclick=qs('#mobileLogout').onclick=()=>supabase.auth.signOut({scope:'local'})
-  qs('#refresh').onclick=()=>openTab(currentTab,true)}
+  qs('#refresh').onclick=()=>openTab(currentTab,true)
+}
 async function openTab(tab,force=false){
   currentTab=tab
   qsa('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab))
   const titles={home:'لوحة الإدارة',stickers:'طباعة ملصقات الطلبات',store_new:'إضافة أوردر',add:'إضافة أوردرات',orders:'إدارة الأوردرات',assign:'توزيع الأوردرات',operations:'العمليات اليومية',stores:'المحلات',users:'الحسابات والصلاحيات',accounts:'الجرد والحسابات',captain:'أوردرات الكابتن',owner:'حساب المحل'}
   qs('#pageTitle').textContent=titles[tab]||'Drop Off'
   qs('#pageSub').textContent=new Date().toLocaleString('ar-JO')
-  try{    if(force)await loadCommon()
+  try{
+    if(force)await loadCommon()
     if(tab==='home')return renderHome()
     if(tab==='stickers')return renderStickers()
     if(tab==='store_new')return renderStoreNew()
@@ -915,7 +921,8 @@ async function renderAccounts(){
   }
   const cashPanel=document.createElement('div');cashPanel.className='panel';cashPanel.style.marginTop='14px'
   cashPanel.innerHTML='<div class="panel-head"><h3>مطابقة كاش اليوم</h3></div><div class="form-grid two"><div class="field"><label>التاريخ</label><input type="date" id="cashDate"></div><div class="field"><label>&nbsp;</label><button id="checkCash" class="btn btn-blue">عرض المطابقة</button></div></div><div id="cashResult"></div>'
-  qs('#content').append(cashPanel)  qs('#cashDate').value=new Date().toLocaleDateString('en-CA')
+  qs('#content').append(cashPanel)
+  qs('#cashDate').value=new Date().toLocaleDateString('en-CA')
   qs('#checkCash').onclick=async()=>{
     const day=qs('#cashDate').value,start=new Date(`${day}T00:00:00+03:00`),end=new Date(start.getTime()+86400000)
     if(!day||Number.isNaN(start.getTime()))return toast('اختر تاريخاً صحيحاً','error')
@@ -934,7 +941,8 @@ async function renderAccounts(){
   qsa('.handover').forEach(b=>b.onclick=()=>amountPrompt('الكاش الذي استلمه المحاسب من الكابتن',async amount=>supabase.from('captain_handovers').insert({captain_id:b.dataset.id,amount,method:'cash',created_by:profile.id})))
   qs('#weeklyStatement').onclick=async()=>{
     const since=new Date(Date.now()-7*86400000).toISOString()
-    const {data,error}=await supabase.from('orders').select('*').gte('created_at',since).order('created_at',{ascending:false}).limit(5000)    if(error)return toast(errText(error),'error')
+    const {data,error}=await supabase.from('orders').select('*').gte('created_at',since).order('created_at',{ascending:false}).limit(5000)
+    if(error)return toast(errText(error),'error')
     downloadOrdersCsv(data,`dropoff-week-${new Date().toISOString().slice(0,10)}.csv`)
   }
 }
