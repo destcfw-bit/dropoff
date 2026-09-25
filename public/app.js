@@ -163,7 +163,7 @@ async function loadCommon(){
     const [{data:s},{data:p},{data:c}] = await Promise.all([
       supabase.from('stores').select('*').order('name'),
       supabase.from('profiles').select('*').order('created_at',{ascending:false}),
-      supabase.from('captains').select('id,captain_type,active,vehicle_label,profiles(full_name,phone,username)').order('created_at',{ascending:false})
+      supabase.from('captains').select('id,captain_type,active,available_today,daily_capacity,vehicle_label,profiles(full_name,phone,username)').order('created_at',{ascending:false})
     ])
     stores=s||[];profiles=p||[];captains=c||[]
   }else if(profile?.role==='store_owner'){
