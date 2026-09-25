@@ -274,3 +274,19 @@ button:focus-visible,a:focus-visible{outline:3px solid #c65300;outline-offset:3p
 @media(prefers-reduced-motion:reduce){
   *,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
+
+/* Attendance and payroll */
+.attendance-panel{margin-top:14px}
+.attendance-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
+.attendance-panel .panel-head{align-items:center;gap:12px}
+.attendance-panel .panel-head .field{min-width:150px}
+.attendance-panel .cards{margin:12px 0 20px}
+.attendance-panel .card small{display:block;margin-top:8px}
+.attendance-panel .table-wrap{margin:12px 0}
+.attendance-panel .pay-rate{width:110px;max-width:100%;padding:8px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--text)}
+@media(max-width:650px){
+  .attendance-stats{grid-template-columns:1fr 1fr}
+  .attendance-panel .panel-head{align-items:stretch;flex-direction:column}
+  .attendance-panel .panel-head .field{min-width:0}
+  .attendance-panel .table-wrap table{min-width:640px}
+}
