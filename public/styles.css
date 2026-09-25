@@ -290,3 +290,12 @@ button:focus-visible,a:focus-visible{outline:3px solid #c65300;outline-offset:3p
   .attendance-panel .panel-head .field{min-width:0}
   .attendance-panel .table-wrap table{min-width:640px}
 }
+.payroll-table{min-width:1280px}
+.payroll-table td{vertical-align:top}
+.payroll-table small{display:block;margin-top:4px;white-space:nowrap}
+.pay-settings{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;min-width:230px}
+.pay-settings label{font-size:11px;color:var(--muted)}
+.pay-settings input{display:block;width:100%;margin-top:3px;padding:7px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text)}
+@media(max-width:650px){
+  .payroll-table{min-width:1220px}
+}
