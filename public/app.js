@@ -21,10 +21,10 @@ let stores = []
 let profiles = []
 let captains = []
 let currentTab = 'home'
+let accountingDate = new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Amman'})
 
 const roleLabels = {
-  admin:'الإدارة', warehouse:'المخزن', pickup_captain:'كابتن جلب',
-  delivery_captain:'كابتن توصيل', store_owner:'صاحب محل'
+  admin:'الإدارة', warehouse:'المخزن', pickup_captain:'كابتن جلب',  delivery_captain:'كابتن توصيل', store_owner:'صاحب محل'
 }
 const statusLabels = {
   new:'جديد', in_warehouse:'بالمخزن', assigned:'مع الكابتن',
@@ -56,14 +56,14 @@ function identifier(v){
 }
 function portal(){
   const p=(location.pathname.split('/').filter(Boolean)[0]||'admin').toLowerCase()
-  return ['admin','captain','store'].includes(p)?p:'admin'
+  return ['admin','management','captain','store'].includes(p)?p:'admin'
 }
 const portalMeta = {
   admin:{title:'لوحة الإدارة',roles:['admin']},
+  management:{title:'رابط الإدارة المالية',roles:['admin']},
   captain:{title:'بوابة الكباتن',roles:['pickup_captain','delivery_captain']},
   store:{title:'بوابة المحلات',roles:['store_owner']}
-}
-function toast(msg,type='ok'){
+}function toast(msg,type='ok'){
   toastEl.textContent=msg
   toastEl.className=`toast show ${type}`
   setTimeout(()=>toastEl.className='toast',2600)
@@ -117,11 +117,10 @@ async function boot(){
 
 function renderAuth(){
   const p=portal(),m=portalMeta[p]
-  const lab=p==='admin'?'اسم المستخدم':'رقم الهاتف أو اسم المستخدم'
+  const lab=['admin','management'].includes(p)?'اسم المستخدم':'رقم الهاتف أو اسم المستخدم'
   const ph=p==='admin'?'dropoff':'0791234567 أو username'
   const portalLine=p==='admin'?'تحكم كامل بالطلبات والمحلات والكباتن':p==='captain'?'طلباتك ومسارك وحسابك في شاشة واحدة':'تابع طلبات محلك وحساباتك بسهولة'
-  app.innerHTML=`<div class="auth-wrap">
-    <div class="auth-glow auth-glow-one"></div><div class="auth-glow auth-glow-two"></div>
+  app.innerHTML=`<div class="auth-wrap">    <div class="auth-glow auth-glow-one"></div><div class="auth-glow auth-glow-two"></div>
     <div class="auth-layout">
       <section class="auth-showcase">
         <div class="auth-logo"><img src="/assets/logo-transparent.png" alt="Drop Off"></div>
@@ -173,18 +172,19 @@ async function loadCommon(){
 }
 
 function defaultTab(){
+  if(portal()==='management')return 'accounts'
   if(profile.role==='store_owner')return 'owner'
   if(['pickup_captain','delivery_captain'].includes(profile.role))return 'captain'
   return 'home'
 }
 function navItems(){
+  if(portal()==='management')return [['accounts','💰 الجرد والحسابات'],['admin_link','↗ إدارة الأوردرات']]
   if(profile.role==='admin')return [
     ['home','⌂ الرئيسية'],['stickers','🏷️ طباعة الملصقات'],['add','＋ إضافة أوردرات'],['orders','▦ الأوردرات'],
-    ['assign','⇄ التوزيع'],['operations','📦 العمليات'],['stores','🏪 المحلات'],['users','👥 الحسابات'],['accounts','💰 المالية']
+    ['assign','⇄ التوزيع'],['operations','📦 العمليات'],['stores','🏪 المحلات'],['users','👥 الحسابات'],['management_link','💰 رابط الإدارة المالية']
   ]
   if(profile.role==='store_owner')return [['store_new','＋ إضافة أوردر'],['owner','▦ طلباتي وحسابي']]
-  return [['captain','▦ أوردراتي']]
-}
+  return [['captain','▦ أوردراتي']]}
 function renderShell(){
   app.innerHTML=`<div class="shell"><aside class="sidebar">
     <div class="side-brand"><img src="/assets/logo-transparent.png"><div><strong>Drop Off</strong><small>${esc(roleLabels[profile.role]||profile.role)}</small></div><span class="live-dot"></span></div>
@@ -196,19 +196,17 @@ function renderShell(){
   </main></div>`
   const menu=qs('#mobileMenu'),nav=qs('#nav')
   const closeMenu=()=>{nav.classList.remove('open');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','فتح القائمة');document.body.classList.remove('menu-open')}
-  qsa('#nav button').forEach(b=>b.onclick=()=>{closeMenu();openTab(b.dataset.tab)})
+  qsa('#nav button').forEach(b=>b.onclick=()=>{closeMenu();if(b.dataset.tab==='management_link')location.href='/management';else if(b.dataset.tab==='admin_link')location.href='/admin';else openTab(b.dataset.tab)})
   menu.onclick=()=>{const open=nav.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'إغلاق القائمة':'فتح القائمة');document.body.classList.toggle('menu-open',open)}
   qs('#logout').onclick=qs('#mobileLogout').onclick=()=>supabase.auth.signOut({scope:'local'})
-  qs('#refresh').onclick=()=>openTab(currentTab,true)
-}
+  qs('#refresh').onclick=()=>openTab(currentTab,true)}
 async function openTab(tab,force=false){
   currentTab=tab
   qsa('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab))
-  const titles={home:'لوحة الإدارة',stickers:'طباعة ملصقات الطلبات',store_new:'إضافة أوردر',add:'إضافة أوردرات',orders:'إدارة الأوردرات',assign:'توزيع الأوردرات',operations:'العمليات اليومية',stores:'المحلات',users:'الحسابات والصلاحيات',accounts:'الحسابات والتسويات',captain:'أوردرات الكابتن',owner:'حساب المحل'}
+  const titles={home:'لوحة الإدارة',stickers:'طباعة ملصقات الطلبات',store_new:'إضافة أوردر',add:'إضافة أوردرات',orders:'إدارة الأوردرات',assign:'توزيع الأوردرات',operations:'العمليات اليومية',stores:'المحلات',users:'الحسابات والصلاحيات',accounts:'الجرد والحسابات',captain:'أوردرات الكابتن',owner:'حساب المحل'}
   qs('#pageTitle').textContent=titles[tab]||'Drop Off'
   qs('#pageSub').textContent=new Date().toLocaleString('ar-JO')
-  try{
-    if(force)await loadCommon()
+  try{    if(force)await loadCommon()
     if(tab==='home')return renderHome()
     if(tab==='stickers')return renderStickers()
     if(tab==='store_new')return renderStoreNew()
@@ -872,17 +870,52 @@ function manageUser(u){
 }
 
 async function renderAccounts(){
-  const [{data:sb,error:e1},{data:cb,error:e2}] = await Promise.all([
+  await loadCommon()
+  const [{data:sb,error:e1},{data:cb,error:e2},{data:overview,error:e3},{data:closures,error:e4},{data:expenses,error:e5},{data:handovers,error:e6}] = await Promise.all([
     supabase.from('store_balance_summary').select('*').order('store_name'),
-    supabase.from('captain_cash_summary').select('*')
+    supabase.from('captain_cash_summary').select('*'),
+    supabase.rpc('accounting_overview',{p_day:accountingDate}),
+    supabase.from('accounting_closures').select('*').order('business_date',{ascending:false}).limit(30),
+    supabase.from('accounting_expenses').select('amount,category,note,spent_at,method').order('spent_at',{ascending:false}).limit(20),
+    supabase.from('captain_handovers').select('captain_id,amount,handed_over_at,method').order('handed_over_at',{ascending:false}).limit(20)
   ])
-  if(e1)throw e1;if(e2)throw e2
-  qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>حسابات المحلات</h3><button id="weeklyStatement" class="btn btn-blue">تنزيل كشف الأسبوع CSV</button></div><div class="cards">${(sb||[]).map(x=>`<div class="card"><h4>${esc(x.store_name)}</h4><p>تم التسليم: ${x.delivered_orders||0} · مرتجع: ${x.returned_orders||0}</p><p>تحصيلات: ${money(x.collections)}</p><p>رسوم: ${money(Number(x.delivery_fees||0)+Number(x.return_fees||0))}</p><p>تم الدفع: ${money(x.paid_out)}</p><div class="money">${money(x.balance_due)}</div><button class="btn btn-sm btn-green settle-store" data-id="${x.store_id}">تسجيل دفعة</button></div>`).join('')||'<div class="empty">لا توجد بيانات</div>'}</div></div>
+  if(e1||e2||e3||e4||e5||e6)throw e1||e2||e3||e4||e5||e6
+  const closed=(closures||[]).find(x=>x.business_date===accountingDate)
+  const changedAfterClose=closed&&['orders_cash','handovers_cash','store_payouts','expenses','fees_earned'].some(k=>Number(closed[k])!==Number(overview[k]))
+  const expenseNames={salary:'رواتب',fuel:'وقود',warehouse:'مخزن',other:'أخرى'}
+  const day=accountingDate
+  qs('#content').innerHTML=`<div class="panel accounting-head"><div class="panel-head"><div><span class="eyebrow">DROP OFF MANAGEMENT · الحسابات</span><h3>جرد الإدارة والمحاسب</h3></div><div class="field"><label for="accountingDate">تاريخ الجرد</label><input id="accountingDate" type="date" value="${esc(day)}"></div></div>
+    <div class="accounting-stats">${stat('الكاش عند المحاسب الآن',money(overview.accountant_cash))}${stat('عهدة الكباتن الآن',money(overview.captain_outstanding))}${stat('استلام كاش في اليوم',money(overview.handovers_cash))}${stat('رسوم اليوم',money(overview.fees_earned))}${stat('مصاريف اليوم',money(overview.expenses))}${stat('ربح التشغيل لليوم',money(overview.operating_profit))}</div>
+    <p class="muted">كاش المحاسب = الكاش المستلم من الكباتن − دفعات المحلات النقدية − المصاريف النقدية. عهدة الكباتن تظهر منفصلة حتى تُستلم. ربح التشغيل = رسوم التوصيل والمرتجعات − المصاريف المسجّلة؛ لا يشمل تكلفة غير مسجّلة.</p>
+    <div class="accounting-close"><div><strong>${closed?'✓ تم تسكير هذا اليوم':'تسكير اليوم'}</strong><p class="muted">${closed?`الكاش المتوقع عند التسكير ${money(closed.accountant_cash)} · المعدود ${money(closed.counted_cash)} · ${Number(closed.cash_shortage)>=0?'نقص':'زيادة'} ${money(Math.abs(Number(closed.cash_shortage)))}${changedAfterClose?' · ⚠️ أُضيفت حركات بعد التسكير؛ الأرشيف يحفظ الأرقام وقت إغلاق اليوم.':''}`:'بعد استلام الكاش ومطابقة الصندوق، أدخل المبلغ النقدي الموجود فعلياً واحفظ التسكير.'}</p></div>${closed?'':`<div class="field"><label for="countedCash">الكاش المعدود فعلياً</label><input id="countedCash" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div><button id="closeDay" class="btn btn-primary" ${day!==new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Amman'})?'disabled title="يمكن تسكير تاريخ اليوم فقط"':''}>حفظ التسكير</button>`}</div>
+    <div class="accounting-day">تحصيل أوردرات اليوم: <b>${money(overview.orders_cash)}</b> · دفعات المحلات نقداً: <b>${money(overview.store_payouts)}</b></div>
+  </div>
+  <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>حسابات المحلات</h3><button id="weeklyStatement" class="btn btn-blue">تنزيل كشف الأسبوع CSV</button></div><div class="cards">${(sb||[]).map(x=>`<div class="card"><h4>${esc(x.store_name)}</h4><p>تم التسليم: ${x.delivered_orders||0} · مرتجع: ${x.returned_orders||0}</p><p>تحصيلات: ${money(x.collections)}</p><p>رسوم: ${money(Number(x.delivery_fees||0)+Number(x.return_fees||0))}</p><p>تم الدفع: ${money(x.paid_out)}</p><div class="money">${money(x.balance_due)}</div><button class="btn btn-sm btn-green settle-store" data-id="${x.store_id}">تسجيل دفعة</button></div>`).join('')||'<div class="empty">لا توجد بيانات</div>'}</div></div>
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>عهدة الكباتن</h3></div><div class="cards">${(cb||[]).map(x=>`<div class="card"><h4>${esc(x.full_name||'كابتن')}</h4><p>تحصيل: ${money(x.cash_collected)}</p><p>سلّم: ${money(x.cash_handed_over)}</p><div class="money">${money(x.cash_due)}</div><button class="btn btn-sm btn-blue handover" data-id="${x.captain_id}">تسجيل تسليم كاش</button></div>`).join('')||'<div class="empty">لا يوجد كباتن</div>'}</div></div>`
+  const ledger=document.createElement('div');ledger.className='accounting-ledger'
+  ledger.innerHTML=`<div class="panel"><div class="panel-head"><h3>تسليمات الكباتن للمحاسب</h3></div>${(handovers||[]).map(x=>`<div class="ledger-row"><span>${esc(captainName(x.captain_id))} · ${new Date(x.handed_over_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})}</span><b>${money(x.amount)}</b></div>`).join('')||'<div class="empty">لا توجد تسليمات</div>'}</div>
+  <div class="panel"><div class="panel-head"><h3>مصاريف التشغيل</h3></div><form id="expenseForm" class="form-grid two"><div class="field"><label>النوع</label><select id="expenseCategory"><option value="salary">رواتب</option><option value="fuel">وقود</option><option value="warehouse">مخزن</option><option value="other">أخرى</option></select></div><div class="field"><label>المبلغ</label><input id="expenseAmount" type="number" min="0.01" step="0.01" required></div><div class="field"><label>الدفع</label><select id="expenseMethod"><option value="cash">نقداً</option><option value="bank">تحويل</option></select></div><div class="field"><label>تفاصيل</label><input id="expenseNote" maxlength="200" placeholder="مثال: وقود سيارة التوصيل"></div><button type="submit" class="btn btn-blue">تسجيل المصروف</button></form>${(expenses||[]).map(x=>`<div class="ledger-row"><span>${esc(expenseNames[x.category]||x.category)} · ${esc(x.note||'')} · ${x.method==='bank'?'تحويل':'نقداً'}</span><b>${money(x.amount)}</b></div>`).join('')}</div></div>
+  <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>أرشيف التسكير</h3></div>${(closures||[]).map(x=>`<div class="ledger-row"><span>${esc(x.business_date)} · الربح ${money(x.operating_profit)} · ${Number(x.cash_shortage)>=0?'نقص':'زيادة'} ${money(Math.abs(Number(x.cash_shortage)))}</span><b>الصندوق ${money(x.counted_cash)}</b></div>`).join('')||'<div class="empty">لا يوجد تسكير مسجّل بعد</div>'}</div>`
+  qs('#content').append(ledger)
+  qs('#accountingDate').onchange=e=>{accountingDate=e.target.value;renderAccounts()}
+  if(!closed)qs('#closeDay').onclick=async()=>{
+    const input=qs('#countedCash'),value=Number(input.value)
+    if(!input.value.trim()||!Number.isFinite(value)||value<0)return toast('أدخل الكاش المعدود فعلياً','error')
+    if(!confirm(`تأكيد تسكير ${day}؟ الكاش الفعلي ${money(value)}. التسكير يحفظ جرد هذا اليوم في الأرشيف.`))return
+    const {error}=await supabase.rpc('close_accounting_day',{p_day:day,p_counted_cash:value})
+    if(error)return toast(errText(error),'error')
+    toast('تم حفظ جرد اليوم');renderAccounts()
+  }
+  qs('#expenseForm').onsubmit=async e=>{
+    e.preventDefault();const amount=Number(qs('#expenseAmount').value)
+    if(!(amount>0))return toast('المبلغ غير صحيح','error')
+    const {error}=await supabase.from('accounting_expenses').insert({amount,category:qs('#expenseCategory').value,method:qs('#expenseMethod').value,note:qs('#expenseNote').value.trim(),created_by:profile.id})
+    if(error)return toast(errText(error),'error')
+    toast('تم تسجيل المصروف');renderAccounts()
+  }
   const cashPanel=document.createElement('div');cashPanel.className='panel';cashPanel.style.marginTop='14px'
   cashPanel.innerHTML='<div class="panel-head"><h3>مطابقة كاش اليوم</h3></div><div class="form-grid two"><div class="field"><label>التاريخ</label><input type="date" id="cashDate"></div><div class="field"><label>&nbsp;</label><button id="checkCash" class="btn btn-blue">عرض المطابقة</button></div></div><div id="cashResult"></div>'
-  qs('#content').append(cashPanel)
-  qs('#cashDate').value=new Date().toLocaleDateString('en-CA')
+  qs('#content').append(cashPanel)  qs('#cashDate').value=new Date().toLocaleDateString('en-CA')
   qs('#checkCash').onclick=async()=>{
     const day=qs('#cashDate').value,start=new Date(`${day}T00:00:00+03:00`),end=new Date(start.getTime()+86400000)
     if(!day||Number.isNaN(start.getTime()))return toast('اختر تاريخاً صحيحاً','error')
@@ -897,12 +930,11 @@ async function renderAccounts(){
       return `<div class="card"><h4>${esc(c.full_name||'كابتن')}</h4><p>تحصيل اليوم: ${money(due)} · تسليم اليوم: ${money(delivered)}</p><div class="money">فرق: ${money(due-delivered)}</div></div>`
     }).join('')+'</div>'
   }
-  qsa('.settle-store').forEach(b=>b.onclick=()=>amountPrompt('مبلغ الدفعة للمحل',async amount=>supabase.from('store_settlements').insert({store_id:b.dataset.id,amount,created_by:profile.id})))
-  qsa('.handover').forEach(b=>b.onclick=()=>amountPrompt('المبلغ الذي سلّمه الكابتن',async amount=>supabase.from('captain_handovers').insert({captain_id:b.dataset.id,amount,created_by:profile.id})))
+  qsa('.settle-store').forEach(b=>b.onclick=()=>amountPrompt('مبلغ الدفعة النقدية للمحل',async amount=>supabase.from('store_settlements').insert({store_id:b.dataset.id,amount,method:'cash',created_by:profile.id})))
+  qsa('.handover').forEach(b=>b.onclick=()=>amountPrompt('الكاش الذي استلمه المحاسب من الكابتن',async amount=>supabase.from('captain_handovers').insert({captain_id:b.dataset.id,amount,method:'cash',created_by:profile.id})))
   qs('#weeklyStatement').onclick=async()=>{
     const since=new Date(Date.now()-7*86400000).toISOString()
-    const {data,error}=await supabase.from('orders').select('*').gte('created_at',since).order('created_at',{ascending:false}).limit(5000)
-    if(error)return toast(errText(error),'error')
+    const {data,error}=await supabase.from('orders').select('*').gte('created_at',since).order('created_at',{ascending:false}).limit(5000)    if(error)return toast(errText(error),'error')
     downloadOrdersCsv(data,`dropoff-week-${new Date().toISOString().slice(0,10)}.csv`)
   }
 }
