@@ -23,6 +23,11 @@ let captains = []
 let currentTab = 'home'
 let accountingDate = new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Amman'})
 let pendingStoreCopy = null
+let locationWatchId = null
+let locationShiftId = null
+let lastLocationSent = 0
+let attendanceTimer = null
+let managementTimer = null
 
 const roleLabels = {
   admin:'الإدارة', accountant:'المحاسب', warehouse:'المخزن', pickup_captain:'كابتن جلب',
@@ -101,7 +106,7 @@ async function init(){
 }
 
 async function boot(){
-  if(!session){profile=null;renderAuth();return}
+  if(!session){stopCaptainLocation();profile=null;renderAuth();return}
   const {data,error}=await supabase.from('profiles').select('*').eq('id',session.user.id).single()
   if(error || !data){await supabase.auth.signOut({scope:'local'});renderAuth();return}
   profile=data
@@ -203,11 +208,12 @@ function renderShell(){
   const closeMenu=()=>{nav.classList.remove('open');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','فتح القائمة');document.body.classList.remove('menu-open')}
   qsa('#nav button').forEach(b=>b.onclick=()=>{closeMenu();if(b.dataset.tab==='management_link')location.href='/management';else if(b.dataset.tab==='admin_link')location.href='/admin';else openTab(b.dataset.tab)})
   menu.onclick=()=>{const open=nav.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'إغلاق القائمة':'فتح القائمة');document.body.classList.toggle('menu-open',open)}
-  qs('#logout').onclick=qs('#mobileLogout').onclick=()=>supabase.auth.signOut({scope:'local'})
+  qs('#logout').onclick=qs('#mobileLogout').onclick=()=>{stopCaptainLocation();supabase.auth.signOut({scope:'local'})}
   qs('#refresh').onclick=()=>openTab(currentTab,true)
 }
 async function openTab(tab,force=false){
   currentTab=tab
+  if(managementTimer){clearInterval(managementTimer);managementTimer=null}
   qsa('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab))
   const titles={home:'لوحة الإدارة',stickers:'طباعة ملصقات الطلبات',store_new:'إضافة أوردر',add:'إضافة أوردرات',orders:'إدارة الأوردرات',assign:'توزيع الأوردرات',operations:'العمليات اليومية',stores:'المحلات',users:'الحسابات والصلاحيات',accounts:'الجرد والحسابات',captain:'أوردرات الكابتن',owner:'حساب المحل'}
   qs('#pageTitle').textContent=titles[tab]||'Drop Off'
@@ -1010,6 +1016,8 @@ async function renderAccounts(){
   <div class="panel"><div class="panel-head"><h3>مصاريف التشغيل</h3></div><form id="expenseForm" class="form-grid two"><div class="field"><label>النوع</label><select id="expenseCategory"><option value="salary">رواتب</option><option value="fuel">وقود</option><option value="warehouse">مخزن</option><option value="other">أخرى</option></select></div><div class="field"><label>المبلغ</label><input id="expenseAmount" type="number" min="0.01" step="0.01" required></div><div class="field"><label>الدفع</label><select id="expenseMethod"><option value="cash">نقداً</option><option value="bank">تحويل</option></select></div><div class="field"><label>تفاصيل</label><input id="expenseNote" maxlength="200" placeholder="مثال: وقود سيارة التوصيل"></div><div class="field"><label>المحل المرتبط (اختياري)</label><select id="expenseStore"><option value="">مصروف عام</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div><div class="field"><label>المنطقة المرتبطة (اختياري)</label><input id="expenseArea" maxlength="150" placeholder="اتركها فارغة للمصروف العام"></div><button type="submit" class="btn btn-blue">تسجيل المصروف</button></form>${(expenses||[]).map(x=>`<div class="ledger-row"><span>${esc(expenseNames[x.category]||x.category)} · ${esc(x.note||'')} · ${x.method==='bank'?'تحويل':'نقداً'}${x.store_id?' · '+esc(stores.find(s=>s.id===x.store_id)?.name||''):''}${x.area?' · '+esc(x.area):''}</span><b>${money(x.amount)}</b></div>`).join('')}</div></div>
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>أرشيف التسكير</h3></div>${(closures||[]).map(x=>`<div class="ledger-row"><span>${esc(x.business_date)} · الربح ${money(x.operating_profit)} · ${Number(x.cash_shortage)>=0?'نقص':'زيادة'} ${money(Math.abs(Number(x.cash_shortage)))}</span><b>الصندوق ${money(x.counted_cash)}</b></div>`).join('')||'<div class="empty">لا يوجد تسكير مسجّل بعد</div>'}</div>`
   qs('#content').append(ledger)
+  await renderAttendanceManagement()
+  managementTimer=setInterval(()=>{if(currentTab==='accounts' && !document.hidden)renderAttendanceManagement().catch(e=>toast(errText(e),'error'))},30000)
   qs('#accountingDate').onchange=e=>{accountingDate=e.target.value;renderAccounts()}
   if(!closed)qs('#closeDay').onclick=async()=>{
     const input=qs('#countedCash'),value=Number(input.value)
@@ -1071,20 +1079,28 @@ function amountPrompt(label,fn){
 
 async function renderCaptain(){
   const pickup=profile.role==='pickup_captain'
+  const currentMonth=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Amman'}).slice(0,7)
+  const [cy,cm]=currentMonth.split('-').map(Number)
+  const currentMonthStart=new Date(`${currentMonth}-01T00:00:00+03:00`)
+  const currentMonthEnd=new Date(Date.UTC(cy,cm,1)-3*3600000)
   let q=supabase.from('orders').select('*').order('created_at',{ascending:false})
   q=pickup?q.eq('pickup_captain_id',profile.id):q.eq('delivery_captain_id',profile.id)
   if(!pickup)q=q.not('status','in','("delivered","returned_store","cancelled")')
-  const [{data,error},cashResult,deliveredResult,handoversResult,todayResult]=await Promise.all([
+  const [{data,error},cashResult,deliveredResult,handoversResult,todayResult,shiftsResult,rateResult]=await Promise.all([
     q,
     pickup?Promise.resolve(null):supabase.from('captain_cash_summary').select('cash_collected,cash_handed_over,cash_due').eq('captain_id',profile.id).maybeSingle(),
     pickup?Promise.resolve(null):supabase.from('orders').select('order_code,amount_to_collect,delivered_at').eq('delivery_captain_id',profile.id).eq('status','delivered').eq('payment_type','cod').order('delivered_at',{ascending:false}).limit(8),
     pickup?Promise.resolve(null):supabase.from('captain_handovers').select('id,amount,method,handed_over_at').eq('captain_id',profile.id).order('handed_over_at',{ascending:false}).limit(5000),
-    pickup?Promise.resolve(null):supabase.from('orders').select('id',{count:'exact',head:true}).eq('delivery_captain_id',profile.id).eq('status','delivered').gte('delivered_at',new Date(`${accountingDate}T00:00:00+03:00`).toISOString()).lt('delivered_at',new Date(new Date(`${accountingDate}T00:00:00+03:00`).getTime()+86400000).toISOString())
+    pickup?Promise.resolve(null):supabase.from('orders').select('id',{count:'exact',head:true}).eq('delivery_captain_id',profile.id).eq('status','delivered').gte('delivered_at',new Date(`${accountingDate}T00:00:00+03:00`).toISOString()).lt('delivered_at',new Date(new Date(`${accountingDate}T00:00:00+03:00`).getTime()+86400000).toISOString()),
+    supabase.from('captain_shifts').select('*').eq('captain_id',profile.id).lt('checked_in_at',currentMonthEnd.toISOString()).or(`checked_out_at.is.null,checked_out_at.gt.${currentMonthStart.toISOString()}`).order('checked_in_at',{ascending:false}).limit(5000),
+    supabase.from('captain_pay_rates').select('hourly_rate').eq('captain_id',profile.id).maybeSingle()
   ])
-  if(error)throw error
+  if(error||shiftsResult.error||rateResult.error)throw error||shiftsResult.error||rateResult.error
   if(cashResult?.error||deliveredResult?.error||handoversResult?.error||todayResult?.error)throw cashResult?.error||deliveredResult?.error||handoversResult?.error||todayResult?.error
   const cash=cashResult?.data
   const due=Number(cash?.cash_due||0)
+  const openShift=(shiftsResult.data||[]).find(x=>!x.checked_out_at)
+  const monthHours=(shiftsResult.data||[]).filter(x=>x.checked_out_at).reduce((n,x)=>n+Math.max(0,Math.min(new Date(x.checked_out_at).getTime(),currentMonthEnd.getTime())-Math.max(new Date(x.checked_in_at).getTime(),currentMonthStart.getTime()))/3600000,0)
   const date=v=>v?new Date(v).toLocaleDateString('ar-JO',{timeZone:'Asia/Amman'}):'—'
   const grouped=[...(data||[])].sort((a,b)=>String(a.area||'').localeCompare(String(b.area||''),'ar')||(b.priority==='urgent')-(a.priority==='urgent'))
   let lastArea=''
@@ -1094,6 +1110,13 @@ async function renderCaptain(){
     <details class="cash-details"><summary>تفاصيل آخر التحصيلات والتسليمات</summary><div class="cash-history"><div><h4>أوردرات تم تحصيلها</h4>${(deliveredResult.data||[]).map(o=>`<p>${esc(o.order_code)} · ${date(o.delivered_at)} <strong>${money(o.amount_to_collect)}</strong></p>`).join('')||'<p>لا يوجد تحصيلات مسجّلة</p>'}</div><div><h4>دفعات سلّمتها للشركة</h4>${(handoversResult.data||[]).slice(0,20).map(h=>`<p>${date(h.handed_over_at)} · إيصال ${esc(h.id.slice(0,8).toUpperCase())} <strong>${money(h.amount)}</strong></p>`).join('')||'<p>لا يوجد دفعات مسجّلة</p>'}<button id="captainCashCsv" class="btn btn-sm btn-ghost" type="button">تنزيل كشف التسليمات CSV</button></div></div></details>
   </div>`
   qs('#content').innerHTML=`<div class="captain-header"><div><span class="eyebrow">${pickup?'PICKUP CAPTAIN':'DELIVERY CAPTAIN'}</span><h3>مرحباً ${esc(profile.full_name||'كابتن')} 👋</h3></div><span class="badge blue">${data.length} أوردر</span></div>
+  <div class="panel attendance-panel"><div class="panel-head"><h3>⏱ دوامي اليوم</h3><span class="badge ${openShift?'green':'orange'}">${openShift?'في الدوام':'خارج الدوام'}</span></div>
+    <div class="attendance-stats">${stat('ساعات الدوام الحالي',openShift?formatHours((Date.now()-new Date(openShift.checked_in_at).getTime())/3600000):'—')}${stat('ساعات الشهر المكتملة',formatHours(monthHours))}${stat('أجر الساعة',money(rateResult.data?.hourly_rate))}</div>
+    <p class="muted">${openShift?'بدأ الدوام '+new Date(openShift.checked_in_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'}):'سجّل حضورك عند وصولك الشركة.'} · حساب الراتب يعتمد على ساعات الدوام المكتملة فقط.</p>
+    <button id="shiftAction" class="btn ${openShift?'btn-ghost':'btn-primary'}" ${openShift&&due>0?'disabled title="يجب تسليم الكاش للمحاسب أولاً"':''}>${openShift?'إنهاء الدوام':'بدء الدوام'}</button>
+    ${openShift&&due>0?'<p class="muted">لا يمكنك إنهاء الدوام قبل تسليم الكاش للمحاسب.</p>':''}
+    <p id="locationStatus" class="muted">${openShift?'الموقع المباشر يحتاج السماح بالموقع وإبقاء الصفحة مفتوحة.':'يبدأ إرسال الموقع أثناء الدوام إذا سمحت للمتصفح.'}</p>
+  </div>
   ${finance}
   ${pickup?'':`<div class="captain-route-summary">${stat('باقي للتوصيل',grouped.filter(o=>!['returned_warehouse','returned_store'].includes(o.status)).length)}${stat('تم التسليم اليوم',todayResult.count||0)}${stat('مرتجع للمخزن',grouped.filter(o=>o.status==='returned_warehouse').length)}${stat('مبالغ عند التسليم',money(grouped.filter(o=>o.payment_type==='cod'&&!['returned_warehouse','returned_store'].includes(o.status)).reduce((n,o)=>n+Number(o.amount_to_collect||0),0)))}</div>`}
   <div>${!data.length?'<div class="panel"><div class="empty fancy-empty">🛵<strong>ما عندك أوردرات حالياً</strong><span>الأوردرات الجديدة تظهر هون.</span></div></div>':grouped.map(o=>{
@@ -1103,9 +1126,78 @@ async function renderCaptain(){
       <a class="btn btn-sm btn-blue" href="tel:${esc(o.customer_phone)}">📞 اتصال</a><a class="btn btn-sm btn-green" href="https://wa.me/${wp}" target="_blank">واتساب</a><a class="btn btn-sm btn-ghost" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((o.address||'')+' '+(o.area||''))}" target="_blank">📍 خريطة</a>
       ${pickup?`<button class="btn btn-sm btn-primary pickup-received" data-id="${o.id}">وصل للمخزن</button>`:`<button class="btn btn-sm btn-primary cap-status" data-id="${o.id}" data-st="delivered">تم التسليم</button><button class="btn btn-sm btn-ghost cap-status" data-id="${o.id}" data-st="out_for_delivery">بالطريق</button><button class="btn btn-sm btn-ghost cap-status" data-id="${o.id}" data-st="postponed">مؤجل</button><button class="btn btn-sm btn-ghost cap-status" data-id="${o.id}" data-st="no_answer">لا يرد</button><button class="btn btn-sm btn-red cap-status" data-id="${o.id}" data-st="returned_warehouse">إرجاع للمخزن</button>`}
     </div></div>`}).join('')}</div>`
+  qs('#shiftAction').onclick=async()=>{
+    const b=qs('#shiftAction');b.disabled=true
+    const result=openShift?await supabase.from('captain_shifts').update({checked_out_at:new Date().toISOString()}).eq('id',openShift.id).select('id').single():await supabase.from('captain_shifts').insert({captain_id:profile.id}).select('id').single()
+    if(result.error){b.disabled=false;return toast(errText(result.error),'error')}
+    if(openShift)stopCaptainLocation()
+    toast(openShift?'تم إنهاء الدوام':'تم تسجيل بداية الدوام');renderCaptain()
+  }
+  if(attendanceTimer)clearInterval(attendanceTimer)
+  if(openShift){startCaptainLocation(openShift.id);attendanceTimer=setInterval(()=>{const x=qs('.attendance-stats .stat b');if(x)x.textContent=formatHours((Date.now()-new Date(openShift.checked_in_at).getTime())/3600000)},60000)}
+  else stopCaptainLocation()
   if(!pickup)qs('#captainCashCsv').onclick=()=>downloadCsv(['رقم الإيصال','التاريخ','المبلغ','طريقة الاستلام'],(handoversResult.data||[]).map(h=>[h.id,h.handed_over_at,h.amount,h.method||'cash']),`dropoff-captain-handovers-${accountingDate}.csv`)
   qsa('.cap-status').forEach(b=>b.onclick=async()=>{const r=await supabase.rpc('captain_set_order_status',{p_order_id:b.dataset.id,p_status:b.dataset.st,p_note:null});if(r.error)return toast(errText(r.error),'error');toast('تم تحديث الحالة');renderCaptain()})
   qsa('.pickup-received').forEach(b=>b.onclick=async()=>{const r=await supabase.rpc('pickup_confirm_warehouse',{p_order_id:b.dataset.id});if(r.error)return toast(errText(r.error),'error');toast('تم تأكيد وصول الأوردر للمخزن');renderCaptain()})
+}
+
+function formatHours(n){return `${Math.floor(Math.max(0,n))} س ${String(Math.floor((Math.max(0,n)%1)*60)).padStart(2,'0')} د`}
+function stopCaptainLocation(){
+  if(locationWatchId!==null && navigator.geolocation)navigator.geolocation.clearWatch(locationWatchId)
+  locationWatchId=null;locationShiftId=null;lastLocationSent=0
+  if(attendanceTimer){clearInterval(attendanceTimer);attendanceTimer=null}
+}
+function startCaptainLocation(shiftId){
+  if(locationShiftId===shiftId)return
+  stopCaptainLocation();locationShiftId=shiftId
+  const status=message=>{const el=qs('#locationStatus');if(el)el.textContent=message}
+  if(!navigator.geolocation){status('متصفحك لا يدعم مشاركة الموقع. تسجيل الدوام شغّال.');return}
+  locationWatchId=navigator.geolocation.watchPosition(async fix=>{
+    if(locationShiftId!==shiftId || !session || document.hidden || Date.now()-lastLocationSent<30000)return
+    lastLocationSent=Date.now()
+    const {error}=await supabase.from('captain_live_locations').upsert({captain_id:profile.id,shift_id:shiftId,latitude:fix.coords.latitude,longitude:fix.coords.longitude,accuracy_m:fix.coords.accuracy},{onConflict:'captain_id'})
+    status(error?`تعذر إرسال الموقع: ${errText(error)}`:`آخر تحديث للموقع ${new Date().toLocaleTimeString('ar-JO')}`)
+  },e=>status(e.code===1?'لم تسمح بالموقع؛ الدوام مسجّل لكن التتبع متوقف.':'تعذر تحديد الموقع حالياً؛ الدوام مسجّل.'),{enableHighAccuracy:true,maximumAge:10000,timeout:20000})
+}
+async function renderAttendanceManagement(){
+  const month=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Amman'}).slice(0,7)
+  const previous=qs('#payrollMonth')?.value||month
+  const start=new Date(`${previous}-01T00:00:00+03:00`)
+  if(Number.isNaN(start.getTime()))return
+  const [year,number]=previous.split('-').map(Number)
+  const end=new Date(Date.UTC(year,number,1)-3*3600000)
+  const [shifts,activeShifts,locations,rates]=await Promise.all([
+    supabase.from('captain_shifts').select('*').lt('checked_in_at',end.toISOString()).or(`checked_out_at.is.null,checked_out_at.gt.${start.toISOString()}`).order('checked_in_at',{ascending:false}).limit(5000),
+    supabase.from('captain_shifts').select('*').is('checked_out_at',null),
+    supabase.from('captain_live_locations').select('*'),
+    supabase.from('captain_pay_rates').select('*')
+  ])
+  if(shifts.error||activeShifts.error||locations.error||rates.error)throw shifts.error||activeShifts.error||locations.error||rates.error
+  let panel=qs('#attendanceManagement')
+  if(!panel){panel=document.createElement('div');panel.id='attendanceManagement';panel.className='panel attendance-panel';panel.style.marginTop='14px';qs('#content').append(panel)}
+  const open=activeShifts.data||[],now=Date.now()
+  const countHours=person=>shifts.data.filter(x=>x.captain_id===person.id&&x.checked_out_at).reduce((sum,x)=>sum+Math.max(0,Math.min(new Date(x.checked_out_at).getTime(),end.getTime())-Math.max(new Date(x.checked_in_at).getTime(),start.getTime()))/3600000,0)
+  panel.innerHTML=`<div class="panel-head"><div><h3>📍 دوام الكباتن والرواتب</h3><p class="muted">الموقع يظهر إذا أذن الكابتن وفتح الموقع أثناء الدوام. أجر الشهر تقديري حتى يُسجّل دفع الراتب ضمن مصاريف التشغيل.</p></div><div class="field"><label for="payrollMonth">شهر الراتب</label><input id="payrollMonth" type="month" value="${esc(previous)}"></div></div>
+  <h4>الكباتن على الدوام الآن</h4><div class="cards">${open.map(x=>{
+    const loc=locations.data.find(l=>l.shift_id===x.id),fresh=loc&&now-new Date(loc.updated_at).getTime()<120000
+    return `<div class="card"><h4>${esc(captainName(x.captain_id))}</h4><p>بداية الدوام: ${new Date(x.checked_in_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})}</p><p>المدة حتى الآن: ${formatHours((now-new Date(x.checked_in_at).getTime())/3600000)}</p>${fresh?`<a class="btn btn-sm btn-blue" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps?q=${loc.latitude},${loc.longitude}">📍 افتح الموقع المباشر</a><small class="muted">آخر تحديث ${new Date(loc.updated_at).toLocaleTimeString('ar-JO')} · دقة ${Math.round(loc.accuracy_m||0)} م</small>`:`<p class="muted">${loc?'الموقع قديم؛ الكابتن قد يكون أغلق الصفحة.':'لا يوجد موقع مرسل بعد.'}</p>`}</div>`
+  }).join('')||'<p class="muted">لا يوجد كابتن مسجّل حضور حالياً.</p>'}</div>
+  <div class="panel-head"><h4>كشف ساعات ورواتب ${esc(previous)}</h4><button id="exportPayroll" class="btn btn-sm btn-ghost">تنزيل كشف الرواتب CSV</button></div><div class="table-wrap"><table><thead><tr><th>الكابتن</th><th>الساعات المكتملة</th><th>أجر الساعة (د.أ)</th><th>الراتب المحسوب</th><th>إجراء</th></tr></thead><tbody>${captains.map(c=>{
+    const hours=countHours(c),rate=Number(rates.data.find(r=>r.captain_id===c.id)?.hourly_rate||0)
+    return `<tr><td>${esc(c.profiles?.full_name||'كابتن')}</td><td>${formatHours(hours)}</td><td><input class="pay-rate" data-id="${c.id}" type="number" min="0" max="1000" step="0.01" value="${rate.toFixed(2)}" aria-label="أجر ساعة ${esc(c.profiles?.full_name||'كابتن')}"></td><td>${money(hours*rate)}</td><td><button class="btn btn-sm btn-blue save-pay-rate" data-id="${c.id}">حفظ الأجر</button> <button class="btn btn-sm btn-ghost prepare-pay" data-id="${c.id}" ${!hours||!rate?'disabled':''}>تجهيز صرف</button></td></tr>`
+  }).join('')}</tbody></table></div><p class="muted">الساعات المفتوحة لا تدخل في الراتب. سجل صرف الراتب فعلياً من نموذج «مصاريف التشغيل» في هذه الصفحة، نوع «رواتب».</p>`
+  qs('#payrollMonth').onchange=()=>renderAttendanceManagement().catch(e=>toast(errText(e),'error'))
+  qs('#exportPayroll').onclick=()=>downloadCsv(['الكابتن','الشهر','الساعات','أجر الساعة','الراتب المحسوب'],captains.map(c=>{const hours=countHours(c),rate=Number(rates.data.find(r=>r.captain_id===c.id)?.hourly_rate||0);return [c.profiles?.full_name||'كابتن',previous,hours.toFixed(2),rate.toFixed(2),(hours*rate).toFixed(2)]}),`dropoff-payroll-${previous}.csv`)
+  qsa('.prepare-pay',panel).forEach(b=>b.onclick=()=>{
+    const c=captains.find(x=>x.id===b.dataset.id),hours=countHours(c),rate=Number(rates.data.find(r=>r.captain_id===c.id)?.hourly_rate||0)
+    qs('#expenseCategory').value='salary';qs('#expenseAmount').value=(Math.round(hours*rate*100)/100).toFixed(2);qs('#expenseNote').value=`راتب ${c.profiles?.full_name||'كابتن'} - ${previous} (${hours.toFixed(2)} ساعة)`;qs('#expenseForm').scrollIntoView({behavior:'smooth'});toast('راجع المبلغ وطريقة الدفع ثم اضغط تسجيل المصروف')
+  })
+  qsa('.save-pay-rate',panel).forEach(b=>b.onclick=async()=>{
+    const field=qs(`.pay-rate[data-id="${b.dataset.id}"]`,panel),rate=Number(field.value)
+    if(!field.value.trim()||!Number.isFinite(rate)||rate<0||rate>1000)return toast('أجر الساعة غير صحيح','error')
+    const {error}=await supabase.from('captain_pay_rates').upsert({captain_id:b.dataset.id,hourly_rate:rate,updated_by:profile.id},{onConflict:'captain_id'})
+    if(error)return toast(errText(error),'error');toast('تم حفظ أجر الساعة');renderAttendanceManagement()
+  })
 }
 
 async function renderOwner(){
