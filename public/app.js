@@ -292,7 +292,7 @@ async function renderStickers(){
   const draw=()=>{
     const storeId=qs('#labelStore').value,search=qs('#labelSearch').value.trim().toLowerCase()
     const shown=orders.filter(o=>(!storeId||o.store_id===storeId)&&(!search||[o.order_code,o.customer_name,o.customer_phone].some(v=>String(v||'').toLowerCase().includes(search))))
-    qs('#labelOrders').innerHTML=`<div class="table-wrap"><table class="table"><thead><tr><th>تحديد</th><th>رقم الطلب</th><th>المحل</th><th>الزبون</th><th>المنطقة</th><th>الحالة</th><th>طباعة</th></tr></thead><tbody>${shown.map(o=>`<tr><td><input type="checkbox" class="check label-check" value="${o.id}" aria-label="تحديد ${esc(o.order_code)}"></td><td><strong>${esc(o.order_code)}</strong></td><td>${esc(storeName(o.store_id))}</td><td>${esc(o.customer_name)}</td><td>${esc(o.area)}</td><td>${esc(statusLabels[o.status]||o.status)}</td><td><button class="btn btn-sm btn-blue label-print" data-id="${o.id}">طباعة الملصق</button></td></tr>`).join('')||'<tr><td colspan="7">لا توجد طلبات مطابقة</td></tr>'}</tbody></table></div>`
+    qs('#labelOrders').innerHTML=`<div class="table-wrap"><table class="table"><thead><tr><th>تحديد</th><th>رقم الطلب</th><th>المحل</th><th>الزبون</th><th>المنطقة</th><th>الكابتن</th><th>الحالة</th><th>طباعة</th></tr></thead><tbody>${shown.map(o=>`<tr><td><input type="checkbox" class="check label-check" value="${o.id}" aria-label="تحديد ${esc(o.order_code)}"></td><td><strong>${esc(o.order_code)}</strong></td><td>${esc(storeName(o.store_id))}</td><td>${esc(o.customer_name)}</td><td>${esc(o.area)}</td><td>${esc(labelCaptain(o))}</td><td>${esc(statusLabels[o.status]||o.status)}</td><td><button class="btn btn-sm btn-blue label-print" data-id="${o.id}">طباعة الملصق</button></td></tr>`).join('')||'<tr><td colspan="8">لا توجد طلبات مطابقة</td></tr>'}</tbody></table></div>`
     qsa('.label-print').forEach(b=>b.onclick=()=>printQr(orders.find(o=>o.id===b.dataset.id)))
   }
   qs('#labelStore').onchange=draw
@@ -313,7 +313,7 @@ async function renderStickers(){
     try{
       const all=[]
       for(let offset=0;;offset+=500){
-        let query=supabase.from('orders').select('id,order_code,store_id,customer_name,customer_phone,area,address,amount_to_collect,payment_type,parcel_count,priority,created_at')
+        let query=supabase.from('orders').select('id,order_code,store_id,customer_name,customer_phone,area,address,amount_to_collect,payment_type,parcel_count,priority,pickup_captain_id,delivery_captain_id,created_at')
           .order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+499)
         if(storeId)query=query.eq('store_id',storeId)
         const {data:page,error:pageError}=await query
@@ -507,10 +507,16 @@ function qrLabel(o,qr){
       <div><strong>المحل</strong><span>${esc(storeName(o.store_id))}</span></div>
       <div><strong>الزبون</strong><span>${esc(o.customer_name)} · ${esc(o.customer_phone)}</span></div>
       <div><strong>العنوان</strong><span>${esc(o.area)} — ${esc(o.address)}</span></div>
+      <div><strong>الكابتن</strong><span>${esc(labelCaptain(o))}</span></div>
     </div>
     ${o.notes?`<div class="label-note">${esc(o.notes)}</div>`:''}
     <div class="label-foot"><span>${esc(o.parcel_count||1)} قطعة${o.priority==='urgent'?' · مستعجل':''}</span><b>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)}</b></div>
   </div>`
+}
+function labelCaptain(o){
+  if(o.delivery_captain_id)return captainName(o.delivery_captain_id)
+  if(o.pickup_captain_id)return `${captainName(o.pickup_captain_id)} (جلب)`
+  return 'بانتظار التوزيع'
 }
 async function printWhenReady(w){
   const images=[...w.document.images]
