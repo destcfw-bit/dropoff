@@ -28,6 +28,7 @@ let locationShiftId = null
 let lastLocationSent = 0
 let attendanceTimer = null
 let managementTimer = null
+let attendanceCaptainId = null
 
 const roleLabels = {
   admin:'الإدارة', accountant:'المحاسب', warehouse:'المخزن', pickup_captain:'كابتن جلب',
@@ -1017,7 +1018,7 @@ async function renderAccounts(){
   <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>أرشيف التسكير</h3></div>${(closures||[]).map(x=>`<div class="ledger-row"><span>${esc(x.business_date)} · الربح ${money(x.operating_profit)} · ${Number(x.cash_shortage)>=0?'نقص':'زيادة'} ${money(Math.abs(Number(x.cash_shortage)))}</span><b>الصندوق ${money(x.counted_cash)}</b></div>`).join('')||'<div class="empty">لا يوجد تسكير مسجّل بعد</div>'}</div>`
   qs('#content').append(ledger)
   await renderAttendanceManagement()
-  managementTimer=setInterval(()=>{if(currentTab==='accounts' && !document.hidden)renderAttendanceManagement().catch(e=>toast(errText(e),'error'))},30000)
+  managementTimer=setInterval(()=>{const tag=document.activeElement?.tagName;if(currentTab==='accounts'&&!document.hidden&&!['INPUT','SELECT','TEXTAREA'].includes(tag))renderAttendanceManagement().catch(e=>toast(errText(e),'error'))},60000)
   qs('#accountingDate').onchange=e=>{accountingDate=e.target.value;renderAccounts()}
   if(!closed)qs('#closeDay').onclick=async()=>{
     const input=qs('#countedCash'),value=Number(input.value)
@@ -1083,24 +1084,42 @@ async function renderCaptain(){
   const [cy,cm]=currentMonth.split('-').map(Number)
   const currentMonthStart=new Date(`${currentMonth}-01T00:00:00+03:00`)
   const currentMonthEnd=new Date(Date.UTC(cy,cm,1)-3*3600000)
+  const payrollMonth=`${currentMonth}-01`
   let q=supabase.from('orders').select('*').order('created_at',{ascending:false})
   q=pickup?q.eq('pickup_captain_id',profile.id):q.eq('delivery_captain_id',profile.id)
   if(!pickup)q=q.not('status','in','("delivered","returned_store","cancelled")')
-  const [{data,error},cashResult,deliveredResult,handoversResult,todayResult,shiftsResult,rateResult]=await Promise.all([
+  const performanceQuery=pickup
+    ?supabase.from('orders').select('id,amount_to_collect,payment_type').eq('pickup_captain_id',profile.id).gte('received_at',currentMonthStart.toISOString()).lt('received_at',currentMonthEnd.toISOString()).limit(5000)
+    :supabase.from('orders').select('id,amount_to_collect,payment_type').eq('delivery_captain_id',profile.id).eq('status','delivered').gte('delivered_at',currentMonthStart.toISOString()).lt('delivered_at',currentMonthEnd.toISOString()).limit(5000)
+  const [{data,error},cashResult,deliveredResult,handoversResult,todayResult,shiftsResult,rateResult,settingsResult,reviewsResult,leavesResult,adjustmentsResult,closuresResult,performanceResult,returnsResult]=await Promise.all([
     q,
     pickup?Promise.resolve(null):supabase.from('captain_cash_summary').select('cash_collected,cash_handed_over,cash_due').eq('captain_id',profile.id).maybeSingle(),
     pickup?Promise.resolve(null):supabase.from('orders').select('order_code,amount_to_collect,delivered_at').eq('delivery_captain_id',profile.id).eq('status','delivered').eq('payment_type','cod').order('delivered_at',{ascending:false}).limit(8),
     pickup?Promise.resolve(null):supabase.from('captain_handovers').select('id,amount,method,handed_over_at').eq('captain_id',profile.id).order('handed_over_at',{ascending:false}).limit(5000),
     pickup?Promise.resolve(null):supabase.from('orders').select('id',{count:'exact',head:true}).eq('delivery_captain_id',profile.id).eq('status','delivered').gte('delivered_at',new Date(`${accountingDate}T00:00:00+03:00`).toISOString()).lt('delivered_at',new Date(new Date(`${accountingDate}T00:00:00+03:00`).getTime()+86400000).toISOString()),
     supabase.from('captain_shifts').select('*').eq('captain_id',profile.id).lt('checked_in_at',currentMonthEnd.toISOString()).or(`checked_out_at.is.null,checked_out_at.gt.${currentMonthStart.toISOString()}`).order('checked_in_at',{ascending:false}).limit(5000),
-    supabase.from('captain_pay_rates').select('*').eq('captain_id',profile.id).maybeSingle()
+    supabase.from('captain_pay_rates').select('*').eq('captain_id',profile.id).maybeSingle(),
+    supabase.from('captain_workforce_settings').select('*').eq('id',true).single(),
+    supabase.from('captain_overtime_reviews').select('*'),
+    supabase.from('captain_leave_requests').select('*').order('created_at',{ascending:false}).limit(50),
+    supabase.from('captain_payroll_adjustments').select('*').eq('payroll_month',payrollMonth).order('created_at',{ascending:false}),
+    supabase.from('captain_payroll_closures').select('*').order('payroll_month',{ascending:false}).limit(12),
+    performanceQuery,
+    pickup?Promise.resolve({data:[],error:null}):supabase.from('orders').select('id').eq('delivery_captain_id',profile.id).in('status',['returned_warehouse','returned_store']).gte('returned_at',currentMonthStart.toISOString()).lt('returned_at',currentMonthEnd.toISOString()).limit(5000)
   ])
-  if(error||shiftsResult.error||rateResult.error)throw error||shiftsResult.error||rateResult.error
+  const extraError=settingsResult.error||reviewsResult.error||leavesResult.error||adjustmentsResult.error||closuresResult.error||performanceResult.error||returnsResult.error
+  if(error||shiftsResult.error||rateResult.error||extraError)throw error||shiftsResult.error||rateResult.error||extraError
   if(cashResult?.error||deliveredResult?.error||handoversResult?.error||todayResult?.error)throw cashResult?.error||deliveredResult?.error||handoversResult?.error||todayResult?.error
   const cash=cashResult?.data
   const due=Number(cash?.cash_due||0)
   const openShift=(shiftsResult.data||[]).find(x=>!x.checked_out_at)
-  const monthPay=payrollSummary(profile.id,shiftsResult.data||[],rateResult.data,currentMonthStart,currentMonthEnd,cy,cm)
+  const workforce=settingsResult.data||{}
+  const performanceCount=(performanceResult.data||[]).length
+  const monthPay=payrollSummary(profile.id,shiftsResult.data||[],rateResult.data,currentMonthStart,currentMonthEnd,cy,cm,{reviews:reviewsResult.data||[],leaves:leavesResult.data||[],adjustments:adjustmentsResult.data||[],orderCount:performanceCount,workforceSettings:workforce})
+  const currentClosure=(closuresResult.data||[]).find(x=>x.payroll_month===payrollMonth)
+  const openHours=openShift?(Date.now()-new Date(openShift.checked_in_at).getTime())/3600000:0
+  const forgotCheckout=openShift&&openHours>=Number(workforce.forgotten_checkout_hours||12)
+  const geofenceSet=workforce.company_latitude!==null&&workforce.company_longitude!==null
   const date=v=>v?new Date(v).toLocaleDateString('ar-JO',{timeZone:'Asia/Amman'}):'—'
   const grouped=[...(data||[])].sort((a,b)=>String(a.area||'').localeCompare(String(b.area||''),'ar')||(b.priority==='urgent')-(a.priority==='urgent'))
   let lastArea=''
@@ -1110,13 +1129,20 @@ async function renderCaptain(){
     <details class="cash-details"><summary>تفاصيل آخر التحصيلات والتسليمات</summary><div class="cash-history"><div><h4>أوردرات تم تحصيلها</h4>${(deliveredResult.data||[]).map(o=>`<p>${esc(o.order_code)} · ${date(o.delivered_at)} <strong>${money(o.amount_to_collect)}</strong></p>`).join('')||'<p>لا يوجد تحصيلات مسجّلة</p>'}</div><div><h4>دفعات سلّمتها للشركة</h4>${(handoversResult.data||[]).slice(0,20).map(h=>`<p>${date(h.handed_over_at)} · إيصال ${esc(h.id.slice(0,8).toUpperCase())} <strong>${money(h.amount)}</strong></p>`).join('')||'<p>لا يوجد دفعات مسجّلة</p>'}<button id="captainCashCsv" class="btn btn-sm btn-ghost" type="button">تنزيل كشف التسليمات CSV</button></div></div></details>
   </div>`
   qs('#content').innerHTML=`<div class="captain-header"><div><span class="eyebrow">${pickup?'PICKUP CAPTAIN':'DELIVERY CAPTAIN'}</span><h3>مرحباً ${esc(profile.full_name||'كابتن')} 👋</h3></div><span class="badge blue">${data.length} أوردر</span></div>
+  ${forgotCheckout?'<div class="workforce-alert danger">🔔 دوامك ما زال مفتوحاً منذ وقت طويل. أنهِ الدوام بعد تسليم الكاش.</div>':''}
   <div class="panel attendance-panel"><div class="panel-head"><h3>⏱ دوامي اليوم</h3><span class="badge ${openShift?'green':'orange'}">${openShift?'في الدوام':'خارج الدوام'}</span></div>
-    <div class="attendance-stats">${stat('ساعات الدوام الحالي',openShift?formatHours((Date.now()-new Date(openShift.checked_in_at).getTime())/3600000):'—')}${stat('أيام حضوري بالشهر',monthPay.attendanceDays)}${stat('ساعات الإضافي',formatHours(monthPay.overtimeHours))}${stat('الراتب الأساسي',money(monthPay.monthlySalary))}${stat('بدل الشحن',money(monthPay.allowancePay))}${stat('المستحق حتى الآن',money(monthPay.totalPay))}</div>
-    <p class="muted">${openShift?'بدأ الدوام '+new Date(openShift.checked_in_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'}):'سجّل حضورك عند وصولك الشركة.'} · الراتب 450 د.أ ثابت، و5 د.أ عن كل يوم حضور، والإضافي بعد 5 مساءً بقيمة 1.25× الساعة العادية. الجمعة عطلة، والغياب لا يخصم من الراتب الأساسي.</p>
+    <div class="attendance-stats">${stat('ساعات الدوام الحالي',openShift?formatHours(openHours):'—')}${stat('أيام حضوري بالشهر',monthPay.attendanceDays)}${stat('الساعات المحتسبة',formatHours(monthPay.workedHours))}${stat('إضافي معتمد',formatHours(monthPay.approvedOvertimeHours))}${stat('إضافي بانتظار الموافقة',formatHours(monthPay.pendingOvertimeHours))}${stat('المستحق الحالي',money(currentClosure?currentClosure.net_amount:monthPay.totalPay))}</div>
+    <p class="muted">${openShift?'بدأ الدوام '+new Date(openShift.checked_in_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'}):'سجّل حضورك عند وصولك الشركة.'} · إذا خرجت قبل 5 يُحتسب دوام الراتب حتى 5، ويظهر وقت الخروج الحقيقي للمحاسب. الإضافي بعد 5 يدخل بالراتب بعد موافقة المحاسب.</p>
     <button id="shiftAction" class="btn ${openShift?'btn-ghost':'btn-primary'}" ${openShift&&due>0?'disabled title="يجب تسليم الكاش للمحاسب أولاً"':''}>${openShift?'إنهاء الدوام':'بدء الدوام'}</button>
     ${openShift&&due>0?'<p class="muted">لا يمكنك إنهاء الدوام قبل تسليم الكاش للمحاسب.</p>':''}
-    <p id="locationStatus" class="muted">${openShift?'الموقع المباشر يحتاج السماح بالموقع وإبقاء الصفحة مفتوحة.':'يبدأ إرسال الموقع أثناء الدوام إذا سمحت للمتصفح.'}</p>
+    <p id="locationStatus" class="muted">${openShift?'الموقع المباشر يحتاج السماح بالموقع وإبقاء الصفحة مفتوحة.':geofenceSet?`بدء الدوام متاح داخل نطاق الشركة (${workforce.geofence_radius_m} متر).`:'لم تحدد الإدارة موقع الشركة بعد؛ يبدأ إرسال موقعك بعد الحضور.'}</p>
   </div>
+  <div class="panel attendance-panel"><div class="panel-head"><h3>📅 تقويم حضوري · ${esc(currentMonth)}</h3><span class="muted">الأخضر حضور · البرتقالي تأخير · الأزرق إضافي · البنفسجي إجازة</span></div>${attendanceCalendarHtml(monthPay,cy,cm)}</div>
+  <div class="workforce-two">
+    <div class="panel"><div class="panel-head"><h3>📝 طلب إجازة</h3></div><form id="leaveForm" class="form-grid two"><div class="field"><label>من</label><input id="leaveFrom" type="date" required></div><div class="field"><label>إلى</label><input id="leaveTo" type="date" required></div><div class="field full-span"><label>السبب</label><input id="leaveReason" maxlength="500" minlength="3" required placeholder="سبب الإجازة"></div><button class="btn btn-blue" type="submit">إرسال الطلب</button></form><div class="mini-list">${(leavesResult.data||[]).slice(0,8).map(l=>`<div class="ledger-row"><span>${esc(l.date_from)} → ${esc(l.date_to)} · ${esc(l.reason)}<small class="muted">${leaveStatusLabel(l.status)}${l.review_note?' · '+esc(l.review_note):''}</small></span>${l.status==='pending'?`<button class="btn btn-sm btn-red cancel-leave" data-id="${l.id}">إلغاء</button>`:''}</div>`).join('')||'<p class="muted">لا يوجد طلبات إجازة.</p>'}</div></div>
+    <div class="panel"><div class="panel-head"><h3>🧾 كشف راتبي</h3><button id="captainPayslipCsv" class="btn btn-sm btn-ghost">تنزيل CSV</button></div><div class="salary-breakdown"><div><span>الأساسي</span><b>${money(monthPay.monthlySalary)}</b></div><div><span>بدل الشحن</span><b>${money(monthPay.allowancePay)}</b></div><div><span>الإضافي المعتمد</span><b>${money(monthPay.overtimePay)}</b></div><div><span>مكافأة الأداء</span><b>${money(monthPay.autoBonus)}</b></div><div><span>الإضافات والخصومات</span><b>${money(monthPay.adjustmentsTotal)}</b></div><div class="salary-total"><span>الصافي</span><b>${money(currentClosure?currentClosure.net_amount:monthPay.totalPay)}</b></div></div><p class="muted">${currentClosure?(currentClosure.paid_at?`تم الدفع ${new Date(currentClosure.paid_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})}`:'تم تسكير الراتب وبانتظار الدفع'):'الحسبة الحالية قابلة للتغيير حتى يعتمدها المحاسب.'}</p>${currentClosure?.paid_at&&!currentClosure.acknowledged_at?'<button id="ackSalary" class="btn btn-green">✓ تأكيد استلام الراتب</button>':currentClosure?.acknowledged_at?'<span class="badge green">✓ تم تأكيد الاستلام</span>':''}</div>
+  </div>
+  <div class="captain-route-summary">${stat(pickup?'طلبات الجلب بالشهر':'طلبات مسلّمة بالشهر',performanceCount)}${stat('المرتجعات',returnsResult.data?.length||0)}${stat('المعدل لكل ساعة فعلية',monthPay.actualWorkedHours?(performanceCount/monthPay.actualWorkedHours).toFixed(2):'0')}${stat('مكافأة الهدف',money(monthPay.autoBonus))}</div>
   ${finance}
   ${pickup?'':`<div class="captain-route-summary">${stat('باقي للتوصيل',grouped.filter(o=>!['returned_warehouse','returned_store'].includes(o.status)).length)}${stat('تم التسليم اليوم',todayResult.count||0)}${stat('مرتجع للمخزن',grouped.filter(o=>o.status==='returned_warehouse').length)}${stat('مبالغ عند التسليم',money(grouped.filter(o=>o.payment_type==='cod'&&!['returned_warehouse','returned_store'].includes(o.status)).reduce((n,o)=>n+Number(o.amount_to_collect||0),0)))}</div>`}
   <div>${!data.length?'<div class="panel"><div class="empty fancy-empty">🛵<strong>ما عندك أوردرات حالياً</strong><span>الأوردرات الجديدة تظهر هون.</span></div></div>':grouped.map(o=>{
@@ -1128,7 +1154,15 @@ async function renderCaptain(){
     </div></div>`}).join('')}</div>`
   qs('#shiftAction').onclick=async()=>{
     const b=qs('#shiftAction');b.disabled=true
-    const result=openShift?await supabase.from('captain_shifts').update({checked_out_at:new Date().toISOString()}).eq('id',openShift.id).select('id').single():await supabase.from('captain_shifts').insert({captain_id:profile.id}).select('id').single()
+    let result
+    try{
+      if(openShift)result=await supabase.from('captain_shifts').update({checked_out_at:new Date().toISOString()}).eq('id',openShift.id).select('id').single()
+      else{
+        const body={captain_id:profile.id}
+        if(geofenceSet){const fix=await getPositionFix();Object.assign(body,{check_in_latitude:fix.coords.latitude,check_in_longitude:fix.coords.longitude,check_in_accuracy_m:fix.coords.accuracy})}
+        result=await supabase.from('captain_shifts').insert(body).select('id').single()
+      }
+    }catch(e){b.disabled=false;return toast(errText(e),'error')}
     if(result.error){b.disabled=false;return toast(errText(result.error),'error')}
     if(openShift)stopCaptainLocation()
     toast(openShift?'تم إنهاء الدوام':'تم تسجيل بداية الدوام');renderCaptain()
@@ -1136,6 +1170,11 @@ async function renderCaptain(){
   if(attendanceTimer)clearInterval(attendanceTimer)
   if(openShift){startCaptainLocation(openShift.id);attendanceTimer=setInterval(()=>{const x=qs('.attendance-stats .stat b');if(x)x.textContent=formatHours((Date.now()-new Date(openShift.checked_in_at).getTime())/3600000)},60000)}
   else stopCaptainLocation()
+  qs('#leaveFrom').value=localDayKey(Date.now());qs('#leaveTo').value=localDayKey(Date.now())
+  qs('#leaveForm').onsubmit=async e=>{e.preventDefault();const body={captain_id:profile.id,date_from:qs('#leaveFrom').value,date_to:qs('#leaveTo').value,reason:qs('#leaveReason').value.trim()};const {error}=await supabase.from('captain_leave_requests').insert(body);if(error)return toast(errText(error),'error');toast('تم إرسال طلب الإجازة');renderCaptain()}
+  qsa('.cancel-leave').forEach(b=>b.onclick=async()=>{const {error}=await supabase.from('captain_leave_requests').update({status:'cancelled'}).eq('id',b.dataset.id);if(error)return toast(errText(error),'error');toast('تم إلغاء الطلب');renderCaptain()})
+  if(qs('#ackSalary'))qs('#ackSalary').onclick=async()=>{const {error}=await supabase.from('captain_payroll_closures').update({acknowledged_at:new Date().toISOString()}).eq('id',currentClosure.id);if(error)return toast(errText(error),'error');toast('تم تأكيد استلام الراتب');renderCaptain()}
+  qs('#captainPayslipCsv').onclick=()=>downloadCsv(['الشهر','الراتب الأساسي','بدل الشحن','الإضافي المعتمد','مكافأة الأداء','التعديلات','الصافي','الحالة'],[[currentMonth,monthPay.monthlySalary.toFixed(2),monthPay.allowancePay.toFixed(2),monthPay.overtimePay.toFixed(2),monthPay.autoBonus.toFixed(2),monthPay.adjustmentsTotal.toFixed(2),Number(currentClosure?.net_amount??monthPay.totalPay).toFixed(2),currentClosure?.paid_at?'مدفوع':currentClosure?'مسكّر':'قيد الاحتساب']],`dropoff-payslip-${currentMonth}.csv`)
   if(!pickup)qs('#captainCashCsv').onclick=()=>downloadCsv(['رقم الإيصال','التاريخ','المبلغ','طريقة الاستلام'],(handoversResult.data||[]).map(h=>[h.id,h.handed_over_at,h.amount,h.method||'cash']),`dropoff-captain-handovers-${accountingDate}.csv`)
   qsa('.cap-status').forEach(b=>b.onclick=async()=>{const r=await supabase.rpc('captain_set_order_status',{p_order_id:b.dataset.id,p_status:b.dataset.st,p_note:null});if(r.error)return toast(errText(r.error),'error');toast('تم تحديث الحالة');renderCaptain()})
   qsa('.pickup-received').forEach(b=>b.onclick=async()=>{const r=await supabase.rpc('pickup_confirm_warehouse',{p_order_id:b.dataset.id});if(r.error)return toast(errText(r.error),'error');toast('تم تأكيد وصول الأوردر للمخزن');renderCaptain()})
@@ -1146,6 +1185,12 @@ function stopCaptainLocation(){
   if(locationWatchId!==null && navigator.geolocation)navigator.geolocation.clearWatch(locationWatchId)
   locationWatchId=null;locationShiftId=null;lastLocationSent=0
   if(attendanceTimer){clearInterval(attendanceTimer);attendanceTimer=null}
+}
+function getPositionFix(){
+  return new Promise((resolve,reject)=>{
+    if(!navigator.geolocation)return reject(new Error('متصفحك لا يدعم تحديد الموقع'))
+    navigator.geolocation.getCurrentPosition(resolve,e=>reject(new Error(e.code===1?'يجب السماح بالموقع لتسجيل الحضور من الشركة':'تعذر تحديد موقعك، حاول مرة أخرى')),{enableHighAccuracy:true,maximumAge:5000,timeout:20000})
+  })
 }
 function startCaptainLocation(shiftId){
   if(locationShiftId===shiftId)return
@@ -1164,14 +1209,37 @@ function nextDayKey(key){
   const [year,month,day]=key.split('-').map(Number)
   return new Date(Date.UTC(year,month-1,day+1)).toISOString().slice(0,10)
 }
-function payrollSummary(captainId,allShifts,settings,monthStart,monthEnd,year,monthNumber){
+function leaveStatusLabel(status){return ({pending:'قيد المراجعة',approved:'مقبولة',rejected:'مرفوضة',cancelled:'ملغاة'})[status]||status}
+function adjustmentTypeLabel(kind){return ({bonus:'مكافأة',advance:'سلفة',deduction:'خصم',damage:'ضرر أوردر',fine:'مخالفة',other_addition:'إضافة',other_deduction:'اقتطاع آخر'})[kind]||kind}
+function adjustmentSign(kind){return ['bonus','other_addition'].includes(kind)?1:-1}
+function auditTableLabel(name){return ({captain_shifts:'الدوام',captain_pay_rates:'إعداد الراتب',captain_workforce_settings:'إعدادات الشركة',captain_overtime_reviews:'اعتماد الإضافي',captain_leave_requests:'الإجازات',captain_payroll_adjustments:'حركات الراتب',captain_payroll_closures:'تسكير الراتب'})[name]||name}
+function auditActionLabel(action){return ({INSERT:'إضافة',UPDATE:'تعديل',DELETE:'حذف'})[action]||action}
+function rawShiftOvertimeHours(shift,settings){
+  if(!shift?.checked_out_at)return 0
+  const workdayEnd=String(settings?.workday_end||'17:00:00').slice(0,5)
+  const from=new Date(shift.checked_in_at).getTime(),to=new Date(shift.checked_out_at).getTime()
+  let key=localDayKey(from),total=0,guard=0
+  while(guard++<40){
+    const dayStart=new Date(`${key}T00:00:00+03:00`).getTime()
+    if(dayStart>=to)break
+    const next=nextDayKey(key),dayEnd=new Date(`${next}T00:00:00+03:00`).getTime()
+    const cutoff=new Date(`${key}T${workdayEnd}:00+03:00`).getTime()
+    const partStart=Math.max(from,dayStart),partEnd=Math.min(to,dayEnd)
+    if(partEnd>cutoff)total+=Math.max(0,partEnd-Math.max(partStart,cutoff))
+    key=next
+  }
+  return total/3600000
+}
+function payrollSummary(captainId,allShifts,settings,monthStart,monthEnd,year,monthNumber,options={}){
   const monthlySalary=Number(settings?.monthly_salary??450)
   const dailyAllowance=Number(settings?.daily_allowance??5)
   const overtimeMultiplier=Number(settings?.overtime_multiplier??1.25)
+  const workdayStart=String(settings?.workday_start||'08:00:00').slice(0,5)
   const workdayEnd=String(settings?.workday_end||'17:00:00').slice(0,5)
   const shifts=allShifts.filter(x=>x.captain_id===captainId&&x.checked_out_at)
-  const days=new Set(),nonFridayDays=new Set()
-  let workedMs=0,overtimeMs=0
+  const days=new Set(),nonFridayDays=new Set(),dayDetails={},groupedDays=new Map()
+  const reviews=new Map((options.reviews||[]).map(x=>[x.shift_id,x]))
+  let actualWorkedMs=0,approvedOvertimeMs=0,pendingOvertimeMs=0,rejectedOvertimeMs=0
   for(const shift of shifts){
     const rawStart=new Date(shift.checked_in_at).getTime(),rawEnd=new Date(shift.checked_out_at).getTime()
     const from=Math.max(rawStart,monthStart.getTime()),to=Math.min(rawEnd,monthEnd.getTime())
@@ -1180,17 +1248,30 @@ function payrollSummary(captainId,allShifts,settings,monthStart,monthEnd,year,mo
     days.add(attendanceDay)
     const [ay,am,ad]=attendanceDay.split('-').map(Number)
     if(new Date(Date.UTC(ay,am-1,ad)).getUTCDay()!==5)nonFridayDays.add(attendanceDay)
-    workedMs+=to-from
-    let key=attendanceDay,guard=0
-    while(guard++<40){
-      const dayStart=new Date(`${key}T00:00:00+03:00`).getTime()
-      if(dayStart>=to)break
-      const next=nextDayKey(key),dayEnd=new Date(`${next}T00:00:00+03:00`).getTime()
-      const overtimeStart=new Date(`${key}T${workdayEnd}:00+03:00`).getTime()
-      const partStart=Math.max(from,dayStart),partEnd=Math.min(to,dayEnd)
-      if(partEnd>overtimeStart)overtimeMs+=Math.max(0,partEnd-Math.max(partStart,overtimeStart))
-      key=next
+    actualWorkedMs+=to-from
+    const group=groupedDays.get(attendanceDay)||{first:from,last:to,actualMs:0,shifts:[]}
+    group.first=Math.min(group.first,from);group.last=Math.max(group.last,to);group.actualMs+=to-from;group.shifts.push(shift);groupedDays.set(attendanceDay,group)
+    const overtimeMs=rawShiftOvertimeHours(shift,settings)*3600000
+    if(overtimeMs>0){
+      const status=reviews.get(shift.id)?.status
+      if(status==='approved')approvedOvertimeMs+=overtimeMs
+      else if(status==='rejected')rejectedOvertimeMs+=overtimeMs
+      else pendingOvertimeMs+=overtimeMs
     }
+  }
+  let workedMs=0,lateDays=0,earlyLeaveDays=0
+  for(const [key,group] of groupedDays){
+    const [ay,am,ad]=key.split('-').map(Number),friday=new Date(Date.UTC(ay,am-1,ad)).getUTCDay()===5
+    const startTarget=new Date(`${key}T${workdayStart}:00+03:00`).getTime(),endTarget=new Date(`${key}T${workdayEnd}:00+03:00`).getTime()
+    const sameDay=localDayKey(group.last-1)===key
+    const creditedEnd=!friday&&sameDay&&group.first<endTarget&&group.last<endTarget?endTarget:group.last
+    const creditedMs=sameDay?Math.max(group.actualMs,creditedEnd-group.first):group.actualMs
+    const lateMinutes=!friday?Math.max(0,Math.round((group.first-startTarget)/60000)):0
+    const earlyLeave=!friday&&sameDay&&group.last<endTarget
+    if(lateMinutes>0)lateDays++
+    if(earlyLeave)earlyLeaveDays++
+    workedMs+=creditedMs
+    dayDetails[key]={present:true,checkIn:group.first,checkOut:group.last,actualHours:group.actualMs/3600000,creditedHours:creditedMs/3600000,lateMinutes,earlyLeave,overtimeHours:group.shifts.reduce((n,x)=>n+rawShiftOvertimeHours(x,settings),0)}
   }
   const daysInMonth=new Date(Date.UTC(year,monthNumber,0)).getUTCDate()
   let expectedDays=0,elapsedExpectedDays=0
@@ -1201,12 +1282,49 @@ function payrollSummary(captainId,allShifts,settings,monthStart,monthEnd,year,mo
     expectedDays++
     if(monthKey<today.slice(0,7)||(monthKey===today.slice(0,7)&&day<=Number(today.slice(8,10))))elapsedExpectedDays++
   }
+  const approvedLeaveDays=new Set()
+  for(const leave of options.leaves||[]){
+    if(leave.captain_id!==captainId||leave.status!=='approved')continue
+    let key=leave.date_from,guard=0
+    while(key<=leave.date_to&&guard++<70){
+      if(key>=monthKey+'-01'&&key<=localDayKey(monthEnd.getTime()-1)){
+        const [ly,lm,ld]=key.split('-').map(Number)
+        if(new Date(Date.UTC(ly,lm-1,ld)).getUTCDay()!==5&&!nonFridayDays.has(key))approvedLeaveDays.add(key)
+      }
+      key=nextDayKey(key)
+    }
+  }
   const regularHoursPerDay=9
   const regularHourlyRate=expectedDays?monthlySalary/(expectedDays*regularHoursPerDay):0
-  const overtimeHours=overtimeMs/3600000
+  const approvedOvertimeHours=approvedOvertimeMs/3600000,pendingOvertimeHours=pendingOvertimeMs/3600000,rejectedOvertimeHours=rejectedOvertimeMs/3600000
   const allowancePay=days.size*dailyAllowance
-  const overtimePay=overtimeHours*regularHourlyRate*overtimeMultiplier
-  return {monthlySalary,dailyAllowance,overtimeMultiplier,attendanceDays:days.size,attendanceWorkdays:nonFridayDays.size,expectedDays,elapsedExpectedDays,absentDays:Math.max(0,elapsedExpectedDays-nonFridayDays.size),workedHours:workedMs/3600000,overtimeHours,regularHourlyRate,allowancePay,overtimePay,totalPay:monthlySalary+allowancePay+overtimePay}
+  const overtimePay=approvedOvertimeHours*regularHourlyRate*overtimeMultiplier
+  const workforce=options.workforceSettings||{},orderCount=Number(options.orderCount||0)
+  const target=Number(workforce.performance_order_target||300),bonusAmount=Number(workforce.performance_bonus||0)
+  const autoBonus=orderCount>=target?bonusAmount:0
+  const adjustmentRows=(options.adjustments||[]).filter(x=>x.captain_id===captainId)
+  const additions=adjustmentRows.filter(x=>adjustmentSign(x.kind)>0).reduce((n,x)=>n+Number(x.amount||0),0)
+  const deductions=adjustmentRows.filter(x=>adjustmentSign(x.kind)<0).reduce((n,x)=>n+Number(x.amount||0),0)
+  const elapsedLeaveDays=[...approvedLeaveDays].filter(key=>monthKey<today.slice(0,7)||(monthKey===today.slice(0,7)&&key<=today)).length
+  const adjustmentsTotal=additions-deductions,grossPay=monthlySalary+allowancePay+overtimePay+autoBonus
+  return {monthlySalary,dailyAllowance,overtimeMultiplier,attendanceDays:days.size,attendanceWorkdays:nonFridayDays.size,expectedDays,elapsedExpectedDays,approvedLeaveDays:approvedLeaveDays.size,absentDays:Math.max(0,elapsedExpectedDays-nonFridayDays.size-elapsedLeaveDays),workedHours:workedMs/3600000,actualWorkedHours:actualWorkedMs/3600000,approvedOvertimeHours,pendingOvertimeHours,rejectedOvertimeHours,regularHourlyRate,allowancePay,overtimePay,autoBonus,additions,deductions,adjustmentsTotal,grossPay,totalPay:Math.max(0,grossPay+adjustmentsTotal),lateDays,earlyLeaveDays,dayDetails,leaveDays:approvedLeaveDays}
+}
+function attendanceCalendarHtml(pay,year,monthNumber){
+  const daysInMonth=new Date(Date.UTC(year,monthNumber,0)).getUTCDate(),today=localDayKey(Date.now())
+  let cells='<div class="calendar-weekdays"><span>س</span><span>ح</span><span>ن</span><span>ث</span><span>ر</span><span>خ</span><span>ج</span></div><div class="attendance-calendar">'
+  const firstDay=(new Date(Date.UTC(year,monthNumber-1,1)).getUTCDay()+1)%7
+  cells+='<span class="calendar-pad"></span>'.repeat(firstDay)
+  for(let day=1;day<=daysInMonth;day++){
+    const key=`${year}-${String(monthNumber).padStart(2,'0')}-${String(day).padStart(2,'0')}`,dow=new Date(Date.UTC(year,monthNumber-1,day)).getUTCDay(),detail=pay.dayDetails[key]
+    let cls='future',label='—'
+    if(dow===5){cls='friday';label='جمعة'}
+    else if(pay.leaveDays.has(key)){cls='leave';label='إجازة'}
+    else if(detail){cls=detail.lateMinutes>0?'late':'present';if(detail.overtimeHours>0)cls+=' overtime';label=detail.overtimeHours>0?'إضافي':detail.earlyLeave?'خروج مبكر':'حضور'}
+    else if(key<=today){cls='absent';label='غياب'}
+    const title=detail?`دخول ${new Date(detail.checkIn).toLocaleTimeString('ar-JO',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Amman'})} · خروج ${new Date(detail.checkOut).toLocaleTimeString('ar-JO',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Amman'})} · محسوب ${formatHours(detail.creditedHours)}`:label
+    cells+=`<span class="calendar-day ${cls}" title="${esc(title)}"><b>${day}</b><small>${label}</small></span>`
+  }
+  return cells+'</div>'
 }
 async function renderAttendanceManagement(){
   const month=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Amman'}).slice(0,7)
@@ -1215,33 +1333,73 @@ async function renderAttendanceManagement(){
   if(Number.isNaN(start.getTime()))return
   const [year,number]=previous.split('-').map(Number)
   const end=new Date(Date.UTC(year,number,1)-3*3600000)
-  const [shifts,activeShifts,locations,rates]=await Promise.all([
+  const payrollMonth=`${previous}-01`,monthLast=localDayKey(end.getTime()-1)
+  const [shifts,activeShifts,locations,rates,settings,reviews,leaves,adjustments,closures,delivered,returns,pickups,audits]=await Promise.all([
     supabase.from('captain_shifts').select('*').lt('checked_in_at',end.toISOString()).or(`checked_out_at.is.null,checked_out_at.gt.${start.toISOString()}`).order('checked_in_at',{ascending:false}).limit(5000),
     supabase.from('captain_shifts').select('*').is('checked_out_at',null),
     supabase.from('captain_live_locations').select('*'),
-    supabase.from('captain_pay_rates').select('*')
+    supabase.from('captain_pay_rates').select('*'),
+    supabase.from('captain_workforce_settings').select('*').eq('id',true).single(),
+    supabase.from('captain_overtime_reviews').select('*'),
+    supabase.from('captain_leave_requests').select('*').lte('date_from',monthLast).gte('date_to',payrollMonth).order('created_at',{ascending:false}).limit(1000),
+    supabase.from('captain_payroll_adjustments').select('*').eq('payroll_month',payrollMonth).order('created_at',{ascending:false}).limit(1000),
+    supabase.from('captain_payroll_closures').select('*').eq('payroll_month',payrollMonth),
+    supabase.from('orders').select('id,delivery_captain_id,amount_to_collect,payment_type').eq('status','delivered').gte('delivered_at',start.toISOString()).lt('delivered_at',end.toISOString()).limit(5000),
+    supabase.from('orders').select('id,delivery_captain_id').in('status',['returned_warehouse','returned_store']).gte('returned_at',start.toISOString()).lt('returned_at',end.toISOString()).limit(5000),
+    supabase.from('orders').select('id,pickup_captain_id').not('pickup_captain_id','is',null).gte('received_at',start.toISOString()).lt('received_at',end.toISOString()).limit(5000),
+    supabase.from('captain_payroll_audit_logs').select('*').order('created_at',{ascending:false}).limit(80)
   ])
-  if(shifts.error||activeShifts.error||locations.error||rates.error)throw shifts.error||activeShifts.error||locations.error||rates.error
+  const loadError=[shifts,activeShifts,locations,rates,settings,reviews,leaves,adjustments,closures,delivered,returns,pickups,audits].find(x=>x.error)?.error
+  if(loadError)throw loadError
   let panel=qs('#attendanceManagement')
   if(!panel){panel=document.createElement('div');panel.id='attendanceManagement';panel.className='panel attendance-panel';panel.style.marginTop='14px';qs('#content').append(panel)}
   const open=activeShifts.data||[],now=Date.now()
   const rateFor=id=>rates.data.find(r=>r.captain_id===id)
-  const summaryFor=c=>payrollSummary(c.id,shifts.data,rateFor(c.id),start,end,year,number)
-  panel.innerHTML=`<div class="panel-head"><div><h3>📍 دوام الكباتن والرواتب</h3><p class="muted">الراتب الأساسي 450 د.أ، الجمعة عطلة، الدوام 8 صباحاً–5 مساءً، بدل الشحن 5 د.أ لكل يوم حضور، والإضافي بعد الخامسة بقيمة 1.25× الساعة العادية. الغياب يظهر للمراجعة ولا يخصم من الراتب الأساسي.</p></div><div class="field"><label for="payrollMonth">شهر الراتب</label><input id="payrollMonth" type="month" value="${esc(previous)}"></div></div>
-  <h4>الكباتن على الدوام الآن</h4><div class="cards">${open.map(x=>{
-    const loc=locations.data.find(l=>l.shift_id===x.id),fresh=loc&&now-new Date(loc.updated_at).getTime()<120000
-    return `<div class="card"><h4>${esc(captainName(x.captain_id))}</h4><p>بداية الدوام: ${new Date(x.checked_in_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})}</p><p>المدة حتى الآن: ${formatHours((now-new Date(x.checked_in_at).getTime())/3600000)}</p>${fresh?`<a class="btn btn-sm btn-blue" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps?q=${loc.latitude},${loc.longitude}">📍 افتح الموقع المباشر</a><small class="muted">آخر تحديث ${new Date(loc.updated_at).toLocaleTimeString('ar-JO')} · دقة ${Math.round(loc.accuracy_m||0)} م</small>`:`<p class="muted">${loc?'الموقع قديم؛ الكابتن قد يكون أغلق الصفحة.':'لا يوجد موقع مرسل بعد.'}</p>`}</div>`
+  const workforce=settings.data||{},locationStaleMs=Number(workforce.location_stale_minutes||3)*60000,forgotMs=Number(workforce.forgotten_checkout_hours||12)*3600000
+  const performanceFor=c=>{
+    const pickup=c.captain_type==='pickup'
+    const rows=pickup?(pickups.data||[]).filter(x=>x.pickup_captain_id===c.id):(delivered.data||[]).filter(x=>x.delivery_captain_id===c.id)
+    return {count:rows.length,returns:pickup?0:(returns.data||[]).filter(x=>x.delivery_captain_id===c.id).length,cash:pickup?0:rows.filter(x=>x.payment_type==='cod').reduce((n,x)=>n+Number(x.amount_to_collect||0),0)}
+  }
+  const summaryFor=c=>{const performance=performanceFor(c);return payrollSummary(c.id,shifts.data,rateFor(c.id),start,end,year,number,{reviews:reviews.data||[],leaves:leaves.data||[],adjustments:adjustments.data||[],orderCount:performance.count,workforceSettings:workforce})}
+  const closureFor=id=>(closures.data||[]).find(x=>x.captain_id===id)
+  const overtimeItems=(shifts.data||[]).filter(x=>x.checked_out_at&&rawShiftOvertimeHours(x,rateFor(x.captain_id))>0)
+  const pendingOvertime=overtimeItems.filter(x=>!(reviews.data||[]).some(r=>r.shift_id===x.id))
+  const pendingLeaves=(leaves.data||[]).filter(x=>x.status==='pending')
+  const staleOpen=open.filter(x=>{const loc=locations.data.find(l=>l.shift_id===x.id);return !loc||now-new Date(loc.updated_at).getTime()>locationStaleMs})
+  const forgottenOpen=open.filter(x=>now-new Date(x.checked_in_at).getTime()>forgotMs)
+  if(!attendanceCaptainId||!captains.some(c=>c.id===attendanceCaptainId))attendanceCaptainId=captains[0]?.id||null
+  const calendarCaptain=captains.find(c=>c.id===attendanceCaptainId),calendarPay=calendarCaptain?summaryFor(calendarCaptain):null
+  panel.innerHTML=`<div class="panel-head workforce-title"><div><h3>📍 دوام الكباتن والرواتب</h3><p class="muted">الخروج قبل 5 يبقى محسوباً للراتب حتى 5 مع حفظ وقت الخروج الحقيقي. الإضافي لا يدخل في الراتب إلا بعد اعتماده.</p></div><div class="field"><label for="payrollMonth">شهر الراتب</label><input id="payrollMonth" type="month" value="${esc(previous)}"></div></div>
+  <div class="workforce-alerts">${pendingOvertime.length?`<span>⏱ ${pendingOvertime.length} إضافي بانتظار الاعتماد</span>`:''}${pendingLeaves.length?`<span>📝 ${pendingLeaves.length} طلب إجازة</span>`:''}${staleOpen.length?`<span class="danger">🛰️ ${staleOpen.length} موقع متوقف</span>`:''}${forgottenOpen.length?`<span class="danger">🔔 ${forgottenOpen.length} نسي تسجيل الخروج</span>`:''}${!pendingOvertime.length&&!pendingLeaves.length&&!staleOpen.length&&!forgottenOpen.length?'<span class="ok">✓ لا توجد تنبيهات معلّقة</span>':''}</div>
+  <div class="panel workforce-settings"><div class="panel-head"><h3>⚙️ إعداد الدوام والمكافأة</h3><span class="badge ${workforce.company_latitude!==null?'green':'orange'}">${workforce.company_latitude!==null?'نطاق الشركة مفعّل':'حدد موقع الشركة'}</span></div><div class="form-grid four"><div class="field"><label>خط العرض</label><input id="companyLat" type="number" step="any" readonly value="${workforce.company_latitude??''}"></div><div class="field"><label>خط الطول</label><input id="companyLon" type="number" step="any" readonly value="${workforce.company_longitude??''}"></div><div class="field"><label>نطاق الحضور بالمتر</label><input id="geofenceRadius" type="number" min="30" max="5000" value="${workforce.geofence_radius_m||250}"></div><div class="field"><label>تنبيه نسيان الخروج بعد</label><input id="forgotHours" type="number" min="1" max="48" step=".5" value="${workforce.forgotten_checkout_hours||12}"></div><div class="field"><label>توقف الموقع بعد (دقيقة)</label><input id="staleMinutes" type="number" min="1" max="60" value="${workforce.location_stale_minutes||3}"></div><div class="field"><label>هدف الأوردرات الشهري</label><input id="bonusTarget" type="number" min="1" value="${workforce.performance_order_target||300}"></div><div class="field"><label>مكافأة تحقيق الهدف</label><input id="bonusAmount" type="number" min="0" step=".01" value="${workforce.performance_bonus||0}"></div><div class="quick"><button id="captureCompanyLocation" class="btn btn-blue">📍 التقاط موقع الشركة</button><button id="clearCompanyLocation" class="btn btn-ghost">إلغاء النطاق</button><button id="saveWorkforceSettings" class="btn btn-primary">حفظ الإعدادات</button></div></div></div>
+  <h4>الكباتن على الدوام الآن</h4><div class="cards active-captains">${open.map(x=>{
+    const loc=locations.data.find(l=>l.shift_id===x.id),age=loc?now-new Date(loc.updated_at).getTime():Infinity,fresh=age<=locationStaleMs,forgot=now-new Date(x.checked_in_at).getTime()>forgotMs
+    return `<div class="card ${forgot||!fresh?'warning-card':''}"><div class="panel-head"><h4>${esc(captainName(x.captain_id))}</h4><span class="badge ${fresh?'green':'red'}">${fresh?'موقع مباشر':'الموقع متوقف'}</span></div><p>بداية الدوام: ${new Date(x.checked_in_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})}</p><p>المدة: ${formatHours((now-new Date(x.checked_in_at).getTime())/3600000)}</p>${forgot?'<p class="danger-text">🔔 تجاوز مدة الدوام المحددة</p>':''}${fresh?`<a class="btn btn-sm btn-blue" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps?q=${loc.latitude},${loc.longitude}">📍 افتح الموقع</a><small class="muted">آخر تحديث ${new Date(loc.updated_at).toLocaleTimeString('ar-JO')} · دقة ${Math.round(loc.accuracy_m||0)} م</small>`:`<p class="muted">${loc?`آخر تحديث قبل ${Math.round(age/60000)} دقيقة`:'لم يرسل موقعاً بعد'}</p>`}</div>`
   }).join('')||'<p class="muted">لا يوجد كابتن مسجّل حضور حالياً.</p>'}</div>
-  <div class="panel-head"><h4>كشف راتب ${esc(previous)}</h4><button id="exportPayroll" class="btn btn-sm btn-ghost">تنزيل كشف الرواتب CSV</button></div><div class="table-wrap"><table class="payroll-table"><thead><tr><th>الكابتن</th><th>الحضور / أيام العمل</th><th>الغياب حتى اليوم</th><th>إجمالي الساعات</th><th>الإضافي بعد 5</th><th>الراتب الأساسي</th><th>بدل الشحن</th><th>بدل الإضافي</th><th>الإجمالي</th><th>إجراء</th></tr></thead><tbody>${captains.map(c=>{
-    const pay=summaryFor(c)
-    return `<tr><td><strong>${esc(c.profiles?.full_name||'كابتن')}</strong><div class="pay-settings"><label>الراتب <input class="monthly-salary" data-id="${c.id}" type="number" min="0" max="10000" step="0.01" value="${pay.monthlySalary.toFixed(2)}"></label><label>بدل اليوم <input class="daily-allowance" data-id="${c.id}" type="number" min="0" max="1000" step="0.01" value="${pay.dailyAllowance.toFixed(2)}"></label></div></td><td>${pay.attendanceDays} / ${pay.expectedDays}</td><td>${pay.absentDays}<small class="muted">بدون خصم</small></td><td>${formatHours(pay.workedHours)}</td><td>${formatHours(pay.overtimeHours)}<small class="muted">${money(pay.regularHourlyRate*pay.overtimeMultiplier)}/ساعة</small></td><td>${money(pay.monthlySalary)}</td><td>${money(pay.allowancePay)}</td><td>${money(pay.overtimePay)}</td><td><strong>${money(pay.totalPay)}</strong></td><td><button class="btn btn-sm btn-blue save-pay-policy" data-id="${c.id}">حفظ</button> <button class="btn btn-sm btn-ghost prepare-pay" data-id="${c.id}">تجهيز صرف</button></td></tr>`
-  }).join('')}</tbody></table></div><p class="muted">تدخل في الحسبة ساعات الدوام التي أنهاها الكابتن فقط. الراتب الأساسي ثابت حتى مع الغياب، وبدل الشحن يُحسب مرة واحدة عن كل يوم حضور. سجل صرف الراتب فعلياً من نموذج «مصاريف التشغيل».</p>`
+  <div class="workforce-two"><div class="panel"><div class="panel-head"><h3>⏱ اعتماد الساعات الإضافية</h3><span class="badge orange">${pendingOvertime.length}</span></div>${pendingOvertime.map(x=>{const h=rawShiftOvertimeHours(x,rateFor(x.captain_id));return `<div class="approval-row"><div><strong>${esc(captainName(x.captain_id))}</strong><small>${new Date(x.checked_in_at).toLocaleDateString('ar-JO')} · ${formatHours(h)} بعد الخامسة</small></div><div class="quick"><button class="btn btn-sm btn-green review-overtime" data-id="${x.id}" data-status="approved">اعتماد</button><button class="btn btn-sm btn-red review-overtime" data-id="${x.id}" data-status="rejected">رفض</button></div></div>`}).join('')||'<p class="muted">لا توجد ساعات إضافية معلّقة.</p>'}<details><summary>سجل قرارات الإضافي</summary>${overtimeItems.filter(x=>(reviews.data||[]).some(r=>r.shift_id===x.id)).slice(0,30).map(x=>{const r=(reviews.data||[]).find(a=>a.shift_id===x.id);return `<div class="ledger-row"><span>${esc(captainName(x.captain_id))} · ${new Date(x.checked_in_at).toLocaleDateString('ar-JO')} · ${formatHours(rawShiftOvertimeHours(x,rateFor(x.captain_id)))}</span><b class="${r.status==='approved'?'ok-text':'danger-text'}">${r.status==='approved'?'معتمد':'مرفوض'}</b></div>`}).join('')||'<p class="muted">لا يوجد سجل.</p>'}</details></div>
+  <div class="panel"><div class="panel-head"><h3>📝 طلبات الإجازة</h3><span class="badge orange">${pendingLeaves.length}</span></div>${pendingLeaves.map(l=>`<div class="approval-row"><div><strong>${esc(captainName(l.captain_id))}</strong><small>${esc(l.date_from)} → ${esc(l.date_to)} · ${esc(l.reason)}</small></div><div class="quick"><button class="btn btn-sm btn-green review-leave" data-id="${l.id}" data-status="approved">قبول</button><button class="btn btn-sm btn-red review-leave" data-id="${l.id}" data-status="rejected">رفض</button></div></div>`).join('')||'<p class="muted">لا توجد طلبات معلّقة.</p>'}<details><summary>كل طلبات الشهر</summary>${(leaves.data||[]).map(l=>`<div class="ledger-row"><span>${esc(captainName(l.captain_id))} · ${esc(l.date_from)} → ${esc(l.date_to)}</span><b>${leaveStatusLabel(l.status)}</b></div>`).join('')}</details></div></div>
+  <div class="panel"><div class="panel-head"><h3>💳 السلف والخصومات والمكافآت</h3></div><form id="adjustmentForm" class="form-grid four"><div class="field"><label>الكابتن</label><select id="adjustCaptain">${captains.map(c=>`<option value="${c.id}">${esc(c.profiles?.full_name||'كابتن')}</option>`).join('')}</select></div><div class="field"><label>النوع</label><select id="adjustKind"><option value="advance">سلفة</option><option value="deduction">خصم</option><option value="damage">ضرر أوردر</option><option value="fine">مخالفة</option><option value="bonus">مكافأة</option><option value="other_addition">إضافة أخرى</option><option value="other_deduction">اقتطاع آخر</option></select></div><div class="field"><label>المبلغ</label><input id="adjustAmount" type="number" min=".01" step=".01" required></div><div class="field"><label>السبب</label><input id="adjustNote" minlength="2" maxlength="500" required></div><button class="btn btn-blue" type="submit">إضافة للحسبة</button></form><div class="mini-list">${(adjustments.data||[]).map(a=>`<div class="ledger-row"><span>${esc(captainName(a.captain_id))} · ${adjustmentTypeLabel(a.kind)} · ${esc(a.note)}</span><b class="${adjustmentSign(a.kind)>0?'ok-text':'danger-text'}">${adjustmentSign(a.kind)>0?'+':'−'} ${money(a.amount)}</b>${profile.role==='admin'?`<button class="btn btn-sm btn-red delete-adjustment" data-id="${a.id}">حذف</button>`:''}</div>`).join('')||'<p class="muted">لا توجد حركات راتب لهذا الشهر.</p>'}</div></div>
+  <div class="panel payroll-panel"><div class="panel-head"><h3>🧾 كشف وتسكير رواتب ${esc(previous)}</h3><button id="exportPayroll" class="btn btn-sm btn-ghost">تنزيل CSV</button></div><div class="table-wrap"><table class="payroll-table"><thead><tr><th>الكابتن</th><th>الحضور / المطلوب</th><th>تأخير / خروج مبكر</th><th>الساعات المحتسبة</th><th>الإضافي معتمد / معلّق</th><th>الأساسي</th><th>الشحن</th><th>مكافآت</th><th>خصومات وسلف</th><th>الصافي</th><th>الحالة والإجراء</th></tr></thead><tbody>${captains.map(c=>{
+    const pay=summaryFor(c),closure=closureFor(c.id),locked=!!closure,net=Number(closure?.net_amount??pay.totalPay)
+    return `<tr><td><strong>${esc(c.profiles?.full_name||'كابتن')}</strong><div class="pay-settings"><label>الراتب <input class="monthly-salary" data-id="${c.id}" type="number" min="0" max="10000" step=".01" value="${pay.monthlySalary.toFixed(2)}" ${locked?'disabled':''}></label><label>بدل اليوم <input class="daily-allowance" data-id="${c.id}" type="number" min="0" max="1000" step=".01" value="${pay.dailyAllowance.toFixed(2)}" ${locked?'disabled':''}></label></div></td><td>${pay.attendanceDays} / ${pay.expectedDays}<small>إجازة ${pay.approvedLeaveDays} · غياب ${pay.absentDays}</small></td><td>${pay.lateDays} / ${pay.earlyLeaveDays}<small>الخروج المبكر محسوب حتى 5</small></td><td>${formatHours(pay.workedHours)}<small>فعلي ${formatHours(pay.actualWorkedHours)}</small></td><td>${formatHours(pay.approvedOvertimeHours)} / ${formatHours(pay.pendingOvertimeHours)}<small>${money(pay.overtimePay)}</small></td><td>${money(pay.monthlySalary)}</td><td>${money(pay.allowancePay)}</td><td>${money(pay.autoBonus+pay.additions)}</td><td>${money(pay.deductions)}</td><td><strong>${money(net)}</strong></td><td>${closure?`<span class="badge ${closure.paid_at?'green':'blue'}">${closure.paid_at?'مدفوع':'مسكّر'}</span><small>${closure.acknowledged_at?'✓ أكد الاستلام':closure.paid_at?'بانتظار تأكيد الكابتن':'بانتظار الدفع'}</small><div class="quick">${closure.paid_at?'':`<button class="btn btn-sm btn-green pay-salary" data-id="${closure.id}" data-method="cash">دفع نقدي</button><button class="btn btn-sm btn-blue pay-salary" data-id="${closure.id}" data-method="bank">تحويل</button>`}${profile.role==='admin'&&!closure.paid_at?`<button class="btn btn-sm btn-red unlock-payroll" data-id="${closure.id}">إلغاء التسكير</button>`:''}</div>`:`<div class="quick"><button class="btn btn-sm btn-blue save-pay-policy" data-id="${c.id}">حفظ</button><button class="btn btn-sm btn-primary lock-payroll" data-id="${c.id}" ${pay.pendingOvertimeHours>0?'disabled title="اعتمد الإضافي أولاً"':''}>تسكير الراتب</button></div>`}</td></tr>`
+  }).join('')}</tbody></table></div><p class="muted">بعد التسكير تُحفظ نسخة ثابتة من الحسبة. زر الدفع يسجّل الراتب تلقائياً ضمن مصاريف التشغيل، ثم يظهر للكابتن زر تأكيد الاستلام.</p></div>
+  <div class="workforce-two"><div class="panel"><div class="panel-head"><h3>📅 تقويم الحضور</h3><select id="calendarCaptain">${captains.map(c=>`<option value="${c.id}" ${c.id===attendanceCaptainId?'selected':''}>${esc(c.profiles?.full_name||'كابتن')}</option>`).join('')}</select></div>${calendarPay?attendanceCalendarHtml(calendarPay,year,number):'<p class="muted">لا يوجد كباتن.</p>'}</div>
+  <div class="panel"><div class="panel-head"><h3>📊 أداء الكباتن</h3></div>${captains.map(c=>{const p=performanceFor(c),pay=summaryFor(c),ratio=pay.actualWorkedHours?p.count/pay.actualWorkedHours:0;return `<div class="performance-row"><strong>${esc(c.profiles?.full_name||'كابتن')}</strong><span>${c.captain_type==='pickup'?'جلب':'تسليم'}: ${p.count}</span><span>مرتجع: ${p.returns}</span><span>كاش: ${money(p.cash)}</span><span>${ratio.toFixed(2)} أوردر/ساعة</span><b>${pay.autoBonus?`مكافأة ${money(pay.autoBonus)}`:`الهدف ${workforce.performance_order_target||300}`}</b></div>`}).join('')}</div></div>
+  <div class="panel"><details><summary>🛡️ سجل تعديلات الدوام والرواتب</summary><div class="audit-list">${(audits.data||[]).map(a=>`<div class="ledger-row"><span>${esc(profiles.find(p=>p.id===a.actor_id)?.full_name||'النظام')} · ${auditTableLabel(a.table_name)} · ${auditActionLabel(a.action)}<small class="muted">${new Date(a.created_at).toLocaleString('ar-JO',{timeZone:'Asia/Amman'})} · ${esc(a.record_key||'')}</small></span></div>`).join('')||'<p class="muted">لا توجد تعديلات بعد.</p>'}</div></details></div>`
   qs('#payrollMonth').onchange=()=>renderAttendanceManagement().catch(e=>toast(errText(e),'error'))
-  qs('#exportPayroll').onclick=()=>downloadCsv(['الكابتن','الشهر','أيام الحضور','أيام العمل المطلوبة','أيام الغياب','إجمالي الساعات','ساعات الإضافي','الراتب الأساسي','بدل الشحن','بدل الإضافي','الإجمالي'],captains.map(c=>{const pay=summaryFor(c);return [c.profiles?.full_name||'كابتن',previous,pay.attendanceDays,pay.expectedDays,pay.absentDays,pay.workedHours.toFixed(2),pay.overtimeHours.toFixed(2),pay.monthlySalary.toFixed(2),pay.allowancePay.toFixed(2),pay.overtimePay.toFixed(2),pay.totalPay.toFixed(2)]}),`dropoff-payroll-${previous}.csv`)
-  qsa('.prepare-pay',panel).forEach(b=>b.onclick=()=>{
-    const c=captains.find(x=>x.id===b.dataset.id),pay=summaryFor(c)
-    qs('#expenseCategory').value='salary';qs('#expenseAmount').value=(Math.round(pay.totalPay*100)/100).toFixed(2);qs('#expenseNote').value=`راتب ${c.profiles?.full_name||'كابتن'} - ${previous}: أساسي ${pay.monthlySalary.toFixed(2)} + شحن ${pay.allowancePay.toFixed(2)} + إضافي ${pay.overtimePay.toFixed(2)}`;qs('#expenseForm').scrollIntoView({behavior:'smooth'});toast('راجع المبلغ وطريقة الدفع ثم اضغط تسجيل المصروف')
-  })
+  qs('#calendarCaptain').onchange=e=>{attendanceCaptainId=e.target.value;renderAttendanceManagement()}
+  qs('#captureCompanyLocation').onclick=async()=>{try{const fix=await getPositionFix();qs('#companyLat').value=fix.coords.latitude;qs('#companyLon').value=fix.coords.longitude;toast('تم التقاط موقع الشركة؛ اضغط حفظ الإعدادات')}catch(e){toast(errText(e),'error')}}
+  qs('#clearCompanyLocation').onclick=()=>{qs('#companyLat').value='';qs('#companyLon').value='';toast('اضغط حفظ لإلغاء نطاق الحضور')}
+  qs('#saveWorkforceSettings').onclick=async()=>{
+    const body={company_latitude:qs('#companyLat').value===''?null:Number(qs('#companyLat').value),company_longitude:qs('#companyLon').value===''?null:Number(qs('#companyLon').value),geofence_radius_m:Number(qs('#geofenceRadius').value),forgotten_checkout_hours:Number(qs('#forgotHours').value),location_stale_minutes:Number(qs('#staleMinutes').value),performance_order_target:Number(qs('#bonusTarget').value),performance_bonus:Number(qs('#bonusAmount').value)}
+    if((body.company_latitude===null)!==(body.company_longitude===null))return toast('حدد إحداثيات الموقع كاملة','error')
+    const {error}=await supabase.from('captain_workforce_settings').update(body).eq('id',true);if(error)return toast(errText(error),'error');toast('تم حفظ إعدادات الدوام');renderAttendanceManagement()
+  }
+  qsa('.review-overtime',panel).forEach(b=>b.onclick=async()=>{const status=b.dataset.status,note=status==='rejected'?(prompt('سبب رفض الإضافي')||'مرفوض من المحاسب'):'معتمد من المحاسب';const {error}=await supabase.from('captain_overtime_reviews').upsert({shift_id:b.dataset.id,status,note,reviewed_by:profile.id},{onConflict:'shift_id'});if(error)return toast(errText(error),'error');toast(status==='approved'?'تم اعتماد الإضافي':'تم رفض الإضافي');renderAttendanceManagement()})
+  qsa('.review-leave',panel).forEach(b=>b.onclick=async()=>{const status=b.dataset.status,note=status==='rejected'?(prompt('سبب رفض الإجازة')||'مرفوضة'):'مقبولة';const {error}=await supabase.from('captain_leave_requests').update({status,review_note:note,reviewed_by:profile.id,reviewed_at:new Date().toISOString()}).eq('id',b.dataset.id);if(error)return toast(errText(error),'error');toast(status==='approved'?'تم قبول الإجازة':'تم رفض الإجازة');renderAttendanceManagement()})
+  qs('#adjustmentForm').onsubmit=async e=>{e.preventDefault();const amount=Number(qs('#adjustAmount').value);if(!(amount>0))return toast('المبلغ غير صحيح','error');const {error}=await supabase.from('captain_payroll_adjustments').insert({captain_id:qs('#adjustCaptain').value,payroll_month:payrollMonth,kind:qs('#adjustKind').value,amount,note:qs('#adjustNote').value.trim(),created_by:profile.id});if(error)return toast(errText(error),'error');toast('تمت إضافة الحركة للراتب');renderAttendanceManagement()}
+  qsa('.delete-adjustment',panel).forEach(b=>b.onclick=async()=>{if(!confirm('حذف حركة الراتب؟'))return;const {error}=await supabase.from('captain_payroll_adjustments').delete().eq('id',b.dataset.id);if(error)return toast(errText(error),'error');toast('تم حذف الحركة');renderAttendanceManagement()})
   qsa('.save-pay-policy',panel).forEach(b=>b.onclick=async()=>{
     const salaryField=qs(`.monthly-salary[data-id="${b.dataset.id}"]`,panel),allowanceField=qs(`.daily-allowance[data-id="${b.dataset.id}"]`,panel)
     const monthly_salary=Number(salaryField.value),daily_allowance=Number(allowanceField.value)
@@ -1250,6 +1408,16 @@ async function renderAttendanceManagement(){
     const {error}=await supabase.from('captain_pay_rates').upsert({captain_id:b.dataset.id,monthly_salary,daily_allowance,updated_by:profile.id},{onConflict:'captain_id'})
     if(error)return toast(errText(error),'error');toast('تم حفظ نظام راتب الكابتن');renderAttendanceManagement()
   })
+  qsa('.lock-payroll',panel).forEach(b=>b.onclick=async()=>{
+    const c=captains.find(x=>x.id===b.dataset.id),pay=summaryFor(c)
+    if(pay.pendingOvertimeHours>0)return toast('اعتمد أو ارفض الساعات الإضافية أولاً','error')
+    if(!confirm(`تسكير راتب ${c.profiles?.full_name||'الكابتن'} بقيمة ${money(pay.totalPay)}؟`))return
+    const snapshot={captain_name:c.profiles?.full_name||'كابتن',month:previous,monthly_salary:pay.monthlySalary,attendance_days:pay.attendanceDays,expected_days:pay.expectedDays,approved_leave_days:pay.approvedLeaveDays,absent_days:pay.absentDays,late_days:pay.lateDays,early_leave_days:pay.earlyLeaveDays,credited_hours:pay.workedHours,actual_hours:pay.actualWorkedHours,approved_overtime_hours:pay.approvedOvertimeHours,overtime_pay:pay.overtimePay,daily_allowance:pay.dailyAllowance,allowance_pay:pay.allowancePay,performance_bonus:pay.autoBonus,additions:pay.additions,deductions:pay.deductions,generated_at:new Date().toISOString()}
+    const {error}=await supabase.from('captain_payroll_closures').insert({captain_id:c.id,payroll_month:payrollMonth,snapshot,gross_amount:pay.grossPay,adjustments_total:pay.adjustmentsTotal,net_amount:pay.totalPay,locked_by:profile.id});if(error)return toast(errText(error),'error');toast('تم تسكير الراتب');renderAttendanceManagement()
+  })
+  qsa('.pay-salary',panel).forEach(b=>b.onclick=async()=>{const reference=b.dataset.method==='bank'?(prompt('رقم أو ملاحظة التحويل')||'تحويل بنكي'):null;if(!confirm('تأكيد تسجيل دفع الراتب؟ سيُضاف إلى مصاريف التشغيل.'))return;const {error}=await supabase.rpc('pay_captain_salary',{p_closure_id:b.dataset.id,p_method:b.dataset.method,p_reference:reference});if(error)return toast(errText(error),'error');toast('تم تسجيل دفع الراتب');renderAccounts()})
+  qsa('.unlock-payroll',panel).forEach(b=>b.onclick=async()=>{if(!confirm('إلغاء تسكير الراتب وإعادته للحساب المباشر؟'))return;const {error}=await supabase.from('captain_payroll_closures').delete().eq('id',b.dataset.id);if(error)return toast(errText(error),'error');toast('تم إلغاء التسكير');renderAttendanceManagement()})
+  qs('#exportPayroll').onclick=()=>downloadCsv(['الكابتن','الشهر','الحضور','أيام العمل','إجازات','غياب','تأخير','خروج مبكر','ساعات محتسبة','ساعات فعلية','إضافي معتمد','إضافي معلق','الأساسي','بدل الشحن','بدل الإضافي','مكافآت وإضافات','خصومات وسلف','الصافي','الحالة'],captains.map(c=>{const pay=summaryFor(c),closure=closureFor(c.id);return [c.profiles?.full_name||'كابتن',previous,pay.attendanceDays,pay.expectedDays,pay.approvedLeaveDays,pay.absentDays,pay.lateDays,pay.earlyLeaveDays,pay.workedHours.toFixed(2),pay.actualWorkedHours.toFixed(2),pay.approvedOvertimeHours.toFixed(2),pay.pendingOvertimeHours.toFixed(2),pay.monthlySalary.toFixed(2),pay.allowancePay.toFixed(2),pay.overtimePay.toFixed(2),(pay.autoBonus+pay.additions).toFixed(2),pay.deductions.toFixed(2),Number(closure?.net_amount??pay.totalPay).toFixed(2),closure?.paid_at?'مدفوع':closure?'مسكّر':'مفتوح']}),`dropoff-payroll-${previous}.csv`)
 }
 
 async function renderOwner(){
