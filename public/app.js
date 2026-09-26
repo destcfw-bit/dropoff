@@ -128,7 +128,7 @@ function renderAuth(){
   const p=portal(),m=portalMeta[p]
   const lab=['admin','management'].includes(p)?'اسم المستخدم':'رقم الهاتف أو اسم المستخدم'
   const ph=p==='admin'?'dropoff':'0791234567 أو username'
-  const portalLine=p==='admin'?'تحكم كامل بالطلبات والمحلات والكباتن':p==='captain'?'طلباتك ومسارك وحسابك في شاشة واحدة':'تابع طلبات محلك وحساباتك بسهولة'
+  const portalLine=p==='admin'?'تحكم كامل بالطلبات والمحلات والكباتن':p==='management'?'الجرد ورواتب الكباتن وحسابات الشركة بمكان واحد':p==='captain'?'طلباتك ومسارك وحسابك في شاشة واحدة':'تابع طلبات محلك وحساباتك بسهولة'
   app.innerHTML=`<div class="auth-wrap">
     <div class="auth-glow auth-glow-one"></div><div class="auth-glow auth-glow-two"></div>
     <div class="auth-layout">
@@ -136,7 +136,7 @@ function renderAuth(){
         <div class="auth-logo"><img src="/assets/dropoff-blue.png" alt="دروب أوف — Drop Off"></div>
         <div class="auth-showcase-copy"><span class="eyebrow">DROP OFF MANAGEMENT</span><h1>توصيل منظم.<br><em>إدارة أسرع.</em></h1><p>${portalLine}</p></div>
         <div class="auth-points"><span>✓ متابعة مباشرة</span><span>✓ حسابات دقيقة</span><span>✓ دخول آمن</span></div>
-        <div class="auth-mark">DO <small>DELIVERY SERVICES</small></div>
+        <div class="auth-mark">DROP OFF <small>DELIVERY SERVICES</small></div>
       </section>
       <section class="auth-card">
         <div class="auth-form-head"><span class="portal-pill">${m.title}</span><h2>أهلاً بعودتك</h2><p>أدخل بيانات حسابك للمتابعة</p></div>
