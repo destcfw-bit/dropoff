@@ -115,7 +115,7 @@ async function boot(){
   const p=portal()
   if(!portalMeta[p].roles.includes(profile.role)){
     await supabase.auth.signOut({scope:'local'})
-    app.innerHTML=`<div class="auth-wrap"><div class="auth-card"><div class="brand"><div class="logo-shell"><img src="/assets/logo-transparent.png"></div><h1>Drop Off</h1></div><p style="text-align:center">هذا الحساب لا يملك صلاحية الدخول إلى ${portalMeta[p].title}.</p><button id="backLogin" class="btn btn-primary full">رجوع</button></div></div>`
+    app.innerHTML=`<div class="auth-wrap"><div class="auth-card"><div class="brand"><div class="logo-shell"><img src="/assets/dropoff-blue.png" alt="دروب أوف"></div><h1>Drop Off</h1></div><p style="text-align:center">هذا الحساب لا يملك صلاحية الدخول إلى ${portalMeta[p].title}.</p><button id="backLogin" class="btn btn-primary full">رجوع</button></div></div>`
     qs('#backLogin').onclick=renderAuth
     return
   }
@@ -133,7 +133,7 @@ function renderAuth(){
     <div class="auth-glow auth-glow-one"></div><div class="auth-glow auth-glow-two"></div>
     <div class="auth-layout">
       <section class="auth-showcase">
-        <div class="auth-logo"><img src="/assets/logo-transparent.png" alt="Drop Off"></div>
+        <div class="auth-logo"><img src="/assets/dropoff-blue.png" alt="دروب أوف — Drop Off"></div>
         <div class="auth-showcase-copy"><span class="eyebrow">DROP OFF MANAGEMENT</span><h1>توصيل منظم.<br><em>إدارة أسرع.</em></h1><p>${portalLine}</p></div>
         <div class="auth-points"><span>✓ متابعة مباشرة</span><span>✓ حسابات دقيقة</span><span>✓ دخول آمن</span></div>
         <div class="auth-mark">DO <small>DELIVERY SERVICES</small></div>
@@ -198,11 +198,11 @@ function navItems(){
 }
 function renderShell(){
   app.innerHTML=`<div class="shell"><aside class="sidebar">
-    <div class="side-brand"><img src="/assets/logo-transparent.png"><div><strong>Drop Off</strong><small>${esc(roleLabels[profile.role]||profile.role)}</small></div><span class="live-dot"></span></div>
+    <div class="side-brand"><img src="/assets/dropoff-blue.png" alt="دروب أوف"><div><strong>Drop Off</strong><small>${esc(roleLabels[profile.role]||profile.role)}</small></div><span class="live-dot"></span></div>
     <div id="nav" class="nav">${navItems().map(([id,label])=>`<button data-tab="${id}">${label}</button>`).join('')}</div>
     <div class="side-foot"><div class="user-pill">${esc(profile.full_name||profile.username||profile.phone||'مستخدم')}<small>${esc(profile.phone||profile.username||'')}</small></div><button id="logout" class="btn btn-ghost full">تسجيل خروج</button></div>
   </aside><main class="main">
-    <div class="topbar"><div class="mobile-brand"><img src="/assets/logo-transparent.png" alt="Drop Off"><span>Drop Off</span></div><div><h2 id="pageTitle">Drop Off</h2><div id="pageSub" class="muted"></div></div><div class="actions"><button id="refresh" class="btn btn-ghost mobile-action" aria-label="تحديث">↻ <span>تحديث</span></button><button id="mobileLogout" class="btn btn-ghost mobile-action mobile-logout" aria-label="تسجيل خروج" title="تسجيل خروج">⇥</button><button id="mobileMenu" class="btn btn-ghost mobile-action mobile-menu" aria-label="فتح القائمة" aria-controls="nav" aria-expanded="false">☰</button></div></div>
+    <div class="topbar"><div class="mobile-brand"><img src="/assets/dropoff-blue.png" alt="دروب أوف"><span>Drop Off</span></div><div><h2 id="pageTitle">Drop Off</h2><div id="pageSub" class="muted"></div></div><div class="actions"><button id="refresh" class="btn btn-ghost mobile-action" aria-label="تحديث">↻ <span>تحديث</span></button><button id="mobileLogout" class="btn btn-ghost mobile-action mobile-logout" aria-label="تسجيل خروج" title="تسجيل خروج">⇥</button><button id="mobileMenu" class="btn btn-ghost mobile-action mobile-menu" aria-label="فتح القائمة" aria-controls="nav" aria-expanded="false">☰</button></div></div>
     <section id="content"></section>
   </main></div>`
   const menu=qs('#mobileMenu'),nav=qs('#nav')
@@ -543,28 +543,28 @@ async function saveBatch(){
 
 const labelPrintCss=`
   *{box-sizing:border-box}
-  body{margin:0;color:#0b2c4c;font-family:Tahoma,Arial,sans-serif;background:#fff}
+  body{margin:0;color:#0a2d8e;font-family:Tahoma,Arial,sans-serif;background:#fff}
   .sheet{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4mm}
-  .label{position:relative;break-inside:avoid;page-break-inside:avoid;overflow:hidden;border:1.5px solid #0b2c4c;border-radius:9px;background:#fff;padding:3mm;display:flex;flex-direction:column;gap:1.5mm;min-width:0;overflow-wrap:anywhere}
-  .label:before{content:"";position:absolute;top:0;right:0;left:0;height:2mm;background:#f36f00}
+  .label{position:relative;break-inside:avoid;page-break-inside:avoid;overflow:hidden;border:1.5px solid #0a2d8e;border-radius:9px;background:#fff;padding:3mm;display:flex;flex-direction:column;gap:1.5mm;min-width:0;overflow-wrap:anywhere}
+  .label:before{content:"";position:absolute;top:0;right:0;left:0;height:2mm;background:#118ff1}
   .label-head{display:flex;align-items:center;justify-content:center;border-bottom:1px solid #dce5ee;padding:2mm 0 1mm}
-  .label-head img{display:block;width:38mm;height:17mm;object-fit:contain}
+  .label-head img{display:block;width:18mm;height:18mm;object-fit:cover;border-radius:3mm}
   .label-code{text-align:center;font-size:17px;line-height:1.25;font-weight:900;letter-spacing:.3px;direction:ltr;white-space:nowrap}
-  .label-qr{align-self:center;padding:1mm;border:2px solid #0b2c4c;border-radius:7px;background:#fff;line-height:0}
+  .label-qr{align-self:center;padding:1mm;border:2px solid #0a2d8e;border-radius:7px;background:#fff;line-height:0}
   .label-qr img{display:block;width:28mm;height:28mm;image-rendering:pixelated}
   .label-hint{text-align:center;font-size:8px;color:#496078}
   .label-info{border-top:1px solid #dce5ee;padding-top:1mm;font-size:10px;line-height:1.45}
   .label-info div{display:flex;gap:2mm;margin:1mm 0}
-  .label-info strong{color:#0b2c4c;min-width:10mm;flex:none}
+  .label-info strong{color:#0a2d8e;min-width:10mm;flex:none}
   .label-info span{color:#283e54;min-width:0}
   .label-note{font-size:9px;color:#496078;max-height:8mm;overflow:hidden}
   .label-foot{margin-top:auto;border-top:1px solid #dce5ee;padding-top:1.5mm;display:flex;align-items:center;justify-content:space-between;gap:2mm;font-size:10px;font-weight:800}
-  .label-foot b{color:#a84700;font-size:12px}
+  .label-foot b{color:#0d59ca;font-size:12px}
   .sheet .label{min-height:88mm}
   .sheet .label-note{display:none}
   .single{display:grid;place-items:center;min-height:92mm}
   .single .label{width:90mm;min-height:90mm;padding:4mm;gap:1.5mm}
-  .single .label-head img{width:50mm;height:21mm}
+  .single .label-head img{width:22mm;height:22mm}
   .single .label-code{font-size:21px}
   .single .label-qr img{width:32mm;height:32mm}
   .single .label-info{font-size:11px}
@@ -573,7 +573,7 @@ const labelPrintCss=`
 `
 function qrLabel(o,qr){
   return `<div class="label">
-    <div class="label-head"><img src="${location.origin}/assets/logo-transparent.png" alt="Drop Off"></div>
+    <div class="label-head"><img src="${location.origin}/assets/dropoff-blue.png" alt="Drop Off"></div>
     <div class="label-code">${esc(o.order_code)}</div>
     <div class="label-qr"><img src="${qr}" alt="QR ${esc(o.order_code)}"></div>
     <div class="label-hint">امسح الكود لإدارة الطلب · DROP OFF</div>
