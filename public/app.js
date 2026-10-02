@@ -63,8 +63,15 @@ function identifier(v){
   return /^([+]?\d|0)/.test(raw) ? normalizeJordanPhone(raw) : raw.toLowerCase().replace(/\s+/g,'')
 }
 function portal(){
-  const p=(location.pathname.split('/').filter(Boolean)[0]||'admin').toLowerCase()
-  return ['admin','management','captain','store'].includes(p)?p:'admin'
+  const allowed=['admin','management','captain','store']
+  const pathPortal=(location.pathname.split('/').filter(Boolean)[0]||'').toLowerCase()
+  if(allowed.includes(pathPortal)) return pathPortal
+
+  const host=(location.hostname||'').toLowerCase()
+  const subdomain=host.split('.')[0]
+  if(allowed.includes(subdomain)) return subdomain
+
+  return 'admin'
 }
 const portalMeta = {
   admin:{title:'لوحة الإدارة',roles:['admin']},
