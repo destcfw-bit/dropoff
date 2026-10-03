@@ -11,7 +11,7 @@ Deno.serve(async req=>{
   const admin=createClient(url,service,{auth:{persistSession:false,autoRefreshToken:false}})
   const {data:u}=await admin.auth.getUser(token);if(!u?.user)return reply({error:'unauthorized'},401)
   const {data:p}=await admin.from('profiles').select('role,active').eq('id',u.user.id).single()
-  if(!p?.active||!['admin','accountant'].includes(p.role))return reply({error:'not_allowed'},403)
+  if(!p?.active||!['owner','admin','accountant'].includes(p.role))return reply({error:'not_allowed'},403)
   const body=await req.json().catch(()=>({}))
   const d=String(body.date||new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Amman'}).format(new Date()))
   const {data:cached}=await admin.from('ai_daily_summaries').select('*').eq('summary_date',d).maybeSingle()
