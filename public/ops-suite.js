@@ -24,7 +24,7 @@ function renderError(el,e){el.innerHTML=`<div class="ops-warning">⚠️ ${esc(e
 
 export async function renderOpsSuite(ctx){
   const root=ctx.content
-  if(ctx.profile.role!=='admin'){
+  if(!['owner','admin'].includes(ctx.profile.role)){
     root.innerHTML='<div class="panel"><div class="empty">مركز العمليات متاح للإدارة فقط.</div></div>'
     return
   }
