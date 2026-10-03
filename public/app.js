@@ -294,8 +294,10 @@ async function renderHome(){
   const duplicateGroups=[...duplicates.values()].filter(g=>g.length>1)
   const weekly=o.filter(x=>new Date(x.created_at)>=new Date(Date.now()-7*86400000))
   const byStore=stores.map(s=>({name:s.name,count:weekly.filter(x=>x.store_id===s.id).length})).sort((a,b)=>b.count-a.count)
+  const canAdd=['owner','admin','manager','warehouse'].includes(profile.role)
+  const canAssign=['owner','admin','manager','dispatcher'].includes(profile.role)
   qs('#content').innerHTML=`
-    <div class="welcome-card"><div><span class="eyebrow">DROP OFF CONTROL CENTER</span><h3>أهلاً ${esc(profile.full_name||'بالإدارة')} 👋</h3><p>الأوردرات والمخزن والكباتن والحسابات بمكان واحد.</p></div><div class="quick-actions"><button class="btn btn-primary go" data-tab="add">＋ أوردر جديد</button><button class="btn btn-ghost go" data-tab="assign">توزيع الأوردرات</button></div></div>
+    <div class="welcome-card"><div><span class="eyebrow">DROP OFF CONTROL CENTER</span><h3>أهلاً ${esc(profile.full_name||'بالإدارة')} 👋</h3><p>الأوردرات والمخزن والكباتن والحسابات بمكان واحد.</p></div><div class="quick-actions">${canAdd?'<button class="btn btn-primary go" data-tab="add">＋ أوردر جديد</button>':''}${canAssign?'<button class="btn btn-ghost go" data-tab="assign">توزيع الأوردرات</button>':''}</div></div>
     <div class="grid stats">${stat('إجمالي الأوردرات',o.length)}${stat('أوردرات اليوم',today)}${stat('بالمخزن',count('in_warehouse'))}${stat('مع الكباتن',count('assigned')+count('out_for_delivery'))}${stat('تم التسليم',count('delivered'))}${stat('متأخرة وتحتاج متابعة',overdue.length)}</div>
     <div class="finance-strip"><span>قيمة التحصيلات المسلّمة</span><strong>${money(delivered)}</strong><span class="mini-status">● النظام متصل</span></div>
     <div class="panel alert-panel"><div class="panel-head"><h3>تنبيهات تحتاج متابعة</h3><span class="badge orange">${overdue.length+duplicateGroups.length} تنبيه</span></div><div class="accounting-ledger"><div><h4>طلبات متأخرة</h4>${overdue.slice(0,10).map(x=>`<button class="alert-order" data-code="${esc(x.order_code)}">${esc(x.order_code)} · ${esc(x.area||'—')} · ${esc(storeName(x.store_id))}</button>`).join('')||'<p class="muted">ما في أوردرات متأخرة</p>'}</div><div><h4>أرقام مكررة خلال 72 ساعة لنفس المحل</h4>${duplicateGroups.slice(0,10).map(g=>`<button class="alert-order" data-code="${esc(g[0].order_code)}">${esc(storeName(g[0].store_id))} · ${esc(g[0].customer_phone)} · ${g.length} أوردرات</button>`).join('')||'<p class="muted">ما في أوردرات متكررة</p>'}</div></div></div>
@@ -1258,6 +1260,10 @@ async function renderAssign(){
 
 async function renderStores(){
   await loadCommon()
+  if(profile.role==='support'){
+    qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>المحلات</h3><span class="muted">وضع متابعة فقط · ${stores.length} محل</span></div><div class="cards">${stores.map(s=>`<div class="card"><h4>${esc(s.name)}</h4><div class="category-list">${categoryBadges(s.categories)}</div><p>${esc(s.phone||'—')}</p><p>${esc(s.address||'—')}</p><p>الحالة: ${s.active?'فعال':'موقوف'}</p></div>`).join('')||'<div class="empty">لا يوجد محلات</div>'}</div></div>`
+    return
+  }
   qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>إضافة محل</h3></div><form id="storeForm" class="form-grid two">
     <div class="field"><label>اسم المحل</label><input id="stName" required></div>
     <div class="field"><label>الهاتف</label><input id="stPhone"></div>
