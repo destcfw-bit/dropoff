@@ -21,16 +21,18 @@ Deno.serve(async req=>{
     const parcels=Number(body.parcel_count||1)
     const priority=String(body.priority||'normal')
     const serviceType=String(body.service_type||'standard')
+    const packageSize=String(body.package_size||'medium')
     const amount=payment==='prepaid'?0:Number(body.amount_to_collect||0)
-    if(!name||!phone||!area||!address||!['cod','prepaid'].includes(payment)||!Number.isInteger(parcels)||parcels<1||parcels>100||!['normal','urgent'].includes(priority))
+    if(!name||!phone||!area||!address||!['cod','prepaid'].includes(payment)||!Number.isInteger(parcels)||parcels<1||parcels>100||!['normal','urgent'].includes(priority)
+      ||!['standard','same_day','express','pickup_only','return'].includes(serviceType)||!['small','medium','large','xl'].includes(packageSize))
       return reply({error:'invalid_order'},400)
     const {data:store}=await admin.from('stores').select('id,active,branch_id').eq('id',k.store_id).maybeSingle()
     if(!store?.active)return reply({error:'store_inactive'},403)
     const {data:order,error}=await admin.from('orders').insert({
       store_id:k.store_id,branch_id:store.branch_id,customer_name:name,customer_phone:phone,area,address,
-      amount_to_collect:amount,payment_type:payment,parcel_count:parcels,priority,service_type:serviceType,
+      amount_to_collect:amount,payment_type:payment,parcel_count:parcels,priority,service_type:serviceType,package_size:packageSize,
       notes:String(body.notes||'').trim()||null,status:'in_warehouse'
-    }).select('id,order_code,customer_name,customer_phone,area,address,amount_to_collect,delivery_fee,return_fee,payment_type,parcel_count,priority,service_type,status,created_at').single()
+    }).select('id,order_code,customer_name,customer_phone,area,address,amount_to_collect,delivery_fee,return_fee,payment_type,parcel_count,priority,service_type,package_size,status,created_at').single()
     if(error)return reply({error:error.message},400)
     await admin.from('store_api_keys').update({last_used_at:new Date().toISOString()}).eq('id',k.id)
     return reply({ok:true,order},201)
