@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
     if (userErr || !userData?.user) return new Response(JSON.stringify({error:'unauthorized'}), {status:401,headers:cors})
 
     const {data:caller} = await admin.from('profiles').select('role,active').eq('id',userData.user.id).single()
-    if (!caller || caller.role !== 'admin' || caller.active !== true) return new Response(JSON.stringify({error:'admin_only'}), {status:403,headers:cors})
+    if (!caller || !['owner','admin'].includes(caller.role) || caller.active !== true) return new Response(JSON.stringify({error:'admin_only'}), {status:403,headers:cors})
 
     const body = await req.json()
     const user_id = String(body.user_id || '')
