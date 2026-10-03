@@ -1,6 +1,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/+esm'
 import QRCode from 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm'
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './config.js'
+import { renderOpsSuite, attachGlobalSearch } from './ops-suite.js'
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY,{
   auth:{
@@ -94,7 +95,7 @@ async function login(id,password){
   })
   const d=await r.json().catch(()=>({}))
   if(!r.ok || !d?.access_token || !d?.refresh_token){
-    throw new Error(d?.error==='invalid_credentials'?'بيانات الدخول غير صحيحة':(d?.error||'تعذر تسجيل الدخول'))
+    throw new Error(d?.error==='invalid_credentials'?'بيانات الدخول غير صحيحة':d?.error==='too_many_attempts'?(`محاولات كثيرة. جرّب بعد ${d?.retry_after_minutes||15} دقيقة`):(d?.error||'تعذر تسجيل الدخول'))
   }
   const s=await supabase.auth.setSession({access_token:d.access_token,refresh_token:d.refresh_token})
   if(s.error) throw s.error
@@ -197,7 +198,7 @@ function defaultTab(){
 function navItems(){
   if(portal()==='management')return profile.role==='admin'?[['accounts','💰 الجرد والحسابات'],['admin_link','↗ إدارة الأوردرات']]:[['accounts','💰 الجرد والحسابات']]
   if(profile.role==='admin')return [
-    ['home','⌂ الرئيسية'],['stickers','🏷️ طباعة الملصقات'],['add','＋ إضافة أوردرات'],['orders','▦ الأوردرات'],
+    ['home','⌂ الرئيسية'],['control','⚡ مركز العمليات'],['stickers','🏷️ طباعة الملصقات'],['add','＋ إضافة أوردرات'],['orders','▦ الأوردرات'],
     ['assign','⇄ التوزيع'],['operations','📦 العمليات'],['stores','🏪 المحلات'],['users','👥 الحسابات'],['management_link','💰 رابط الإدارة المالية']
   ]
   if(profile.role==='store_owner')return [['store_new','＋ إضافة أوردر'],['owner','▦ طلباتي وحسابي']]
@@ -218,17 +219,25 @@ function renderShell(){
   menu.onclick=()=>{const open=nav.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'إغلاق القائمة':'فتح القائمة');document.body.classList.toggle('menu-open',open)}
   qs('#logout').onclick=qs('#mobileLogout').onclick=()=>{stopCaptainLocation();supabase.auth.signOut({scope:'local'})}
   qs('#refresh').onclick=()=>openTab(currentTab,true)
+  if(profile.role==='admin')attachGlobalSearch(opsContext(),qs('.topbar .actions'))
+}
+function opsContext(){
+  return {
+    supabase,profile,stores,captains,content:qs('#content'),toast,openTab,
+    supabaseUrl:SUPABASE_URL,publishableKey:SUPABASE_PUBLISHABLE_KEY
+  }
 }
 async function openTab(tab,force=false){
   currentTab=tab
   if(managementTimer){clearInterval(managementTimer);managementTimer=null}
   qsa('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab))
-  const titles={home:'لوحة الإدارة',stickers:'طباعة ملصقات الطلبات',store_new:'إضافة أوردر',add:'إضافة أوردرات',orders:'إدارة الأوردرات',assign:'توزيع الأوردرات',operations:'العمليات اليومية',stores:'المحلات',users:'الحسابات والصلاحيات',accounts:'الجرد والحسابات',captain:'أوردرات الكابتن',owner:'حساب المحل'}
+  const titles={home:'لوحة الإدارة',control:'مركز العمليات والتطوير',stickers:'طباعة ملصقات الطلبات',store_new:'إضافة أوردر',add:'إضافة أوردرات',orders:'إدارة الأوردرات',assign:'توزيع الأوردرات',operations:'العمليات اليومية',stores:'المحلات',users:'الحسابات والصلاحيات',accounts:'الجرد والحسابات',captain:'أوردرات الكابتن',owner:'حساب المحل'}
   qs('#pageTitle').textContent=titles[tab]||'Drop Off'
   qs('#pageSub').textContent=new Date().toLocaleString('ar-JO')
   try{
     if(force)await loadCommon()
     if(tab==='home')return renderHome()
+    if(tab==='control')return renderOpsSuite(opsContext())
     if(tab==='stickers')return renderStickers()
     if(tab==='store_new')return renderStoreNew()
     if(tab==='add')return renderAdd()
