@@ -10,7 +10,7 @@ Deno.serve(async req=>{
   const admin=createClient(url,service,{auth:{persistSession:false,autoRefreshToken:false}})
   const {data:u}=await admin.auth.getUser(token);if(!u?.user)return reply({error:'unauthorized'},401)
   const {data:p}=await admin.from('profiles').select('role,active').eq('id',u.user.id).single()
-  if(!p?.active||p.role!=='admin')return reply({error:'admin_only'},403)
+  if(!p?.active||!['owner','admin'].includes(p.role))return reply({error:'admin_only'},403)
   const {data:db,error}=await admin.rpc('system_health_status')
   const {data:functions}=await admin.from('ai_daily_summaries').select('generated_at').order('generated_at',{ascending:false}).limit(1)
   return reply({ok:!error,database:db||null,openai_configured:Boolean(Deno.env.get('OPENAI_API_KEY')),edge_runtime:true,last_ai_summary:functions?.[0]?.generated_at||null,timestamp:new Date().toISOString()})
