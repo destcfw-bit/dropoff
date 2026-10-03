@@ -7,7 +7,7 @@ const cors = {
   'Content-Type': 'application/json; charset=utf-8',
 }
 
-const allowedRoles = new Set(['store_owner','admin'])
+const allowedRoles = new Set(['store_owner','owner','admin','manager'])
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: cors })
