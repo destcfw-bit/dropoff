@@ -354,6 +354,32 @@ async function renderStickers(){
   draw()
 }
 
+async function prepareOrderPhoto(file){
+  if(!file || !String(file.type||'').startsWith('image/'))throw new Error('اختر صورة واضحة للورقة')
+  if(file.size>14*1024*1024)throw new Error('حجم الصورة كبير. الحد الأقصى 14MB قبل الضغط')
+  const source=await new Promise((resolve,reject)=>{
+    const reader=new FileReader()
+    reader.onload=()=>resolve(String(reader.result||''))
+    reader.onerror=()=>reject(new Error('تعذر قراءة الصورة'))
+    reader.readAsDataURL(file)
+  })
+  const img=await new Promise((resolve,reject)=>{
+    const el=new Image()
+    el.onload=()=>resolve(el)
+    el.onerror=()=>reject(new Error('صيغة الصورة غير مدعومة. جرّب JPG أو PNG'))
+    el.src=source
+  })
+  const maxSide=1800
+  const scale=Math.min(1,maxSide/Math.max(img.naturalWidth||img.width,img.naturalHeight||img.height))
+  const width=Math.max(1,Math.round((img.naturalWidth||img.width)*scale))
+  const height=Math.max(1,Math.round((img.naturalHeight||img.height)*scale))
+  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height
+  const ctx=canvas.getContext('2d',{alpha:false})
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);ctx.drawImage(img,0,0,width,height)
+  return canvas.toDataURL('image/jpeg',.86)
+}
+function aiPct(v){return `${Math.round(Math.max(0,Math.min(1,Number(v||0)))*100)}%`}
+
 async function renderStoreNew(){
   const [{data:links,error},{data:rates,error:rateError}]=await Promise.all([
     supabase.from('store_users').select('store_id,stores(id,name,active,delivery_fee)').eq('user_id',profile.id),
@@ -364,7 +390,25 @@ async function renderStoreNew(){
   const owned=(links||[]).map(x=>x.stores).filter(s=>s?.active)
   if(!owned.length){qs('#content').innerHTML='<div class="panel"><div class="empty">حسابك غير مربوط بمحل نشط.</div></div>';return}
 
-  qs('#content').innerHTML=`<div class="welcome-card"><div><span class="eyebrow">طلب جديد</span><h3>إضافة أوردر 📦</h3><p>أدخل بيانات الزبون، والنظام يولد رقم الطلب وQR تلقائياً. الإدارة تطبع الملصق وتضعه على الكيس.</p></div></div>
+  qs('#content').innerHTML=`<div class="welcome-card"><div><span class="eyebrow">طلب جديد</span><h3>إضافة أوردر 📦</h3><p>أدخل البيانات يدويًا أو صوّر الورقة، والذكاء الاصطناعي يقرأها ويعبّي الحقول لتراجعها قبل الحفظ.</p></div></div>
+    <div class="panel ai-order-panel">
+      <div class="panel-head"><div><h3>📸 إضافة أوردر بالتصوير</h3><span class="muted">صوّر الورقة المكتوب عليها بيانات الزبون، وسيتم تعبئة النموذج تلقائياً.</span></div><span class="badge purple">AI</span></div>
+      <div class="ai-order-grid">
+        <label class="ai-photo-drop" for="aiOrderPhoto">
+          <input id="aiOrderPhoto" type="file" accept="image/*" capture="environment" hidden>
+          <span class="ai-camera">📷</span>
+          <strong>التقاط صورة أو اختيار صورة</strong>
+          <small>يفضل تصوير الورقة بشكل مستقيم وبإضاءة واضحة</small>
+        </label>
+        <div id="aiPhotoPreviewWrap" class="ai-photo-preview empty-preview"><span>معاينة الصورة تظهر هنا</span></div>
+        <div class="ai-order-actions">
+          <button id="analyzeOrderPhoto" class="btn btn-blue" type="button" disabled>✨ تحليل الصورة وملء البيانات</button>
+          <button id="clearOrderPhoto" class="btn btn-ghost" type="button" disabled>مسح الصورة</button>
+          <small class="muted">الصورة لا تُحفظ داخل قاعدة بيانات Drop Off؛ تُستخدم للتحليل فقط. راجع الحقول المعلّمة قبل إنشاء الطلب.</small>
+        </div>
+      </div>
+      <div id="aiOrderResult" class="ai-order-result" role="status" aria-live="polite"></div>
+    </div>
     <div class="panel"><form id="storeOrderForm" class="form-grid two">
       <div class="field"><label for="soStore">المحل</label><select id="soStore" required>${owned.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
       <div class="field"><label for="soName">اسم الزبون</label><input id="soName" required maxlength="150"></div>
@@ -379,6 +423,111 @@ async function renderStoreNew(){
       <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">✓ إنشاء الطلب والـQR</button></div>
     </form><div id="storeOrderResult" role="status" aria-live="polite"></div></div>
     <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>رفع أوردرات من Excel أو CSV</h3><button id="storeTemplate" class="btn btn-sm btn-ghost" type="button">تنزيل نموذج CSV</button></div><p class="muted">الأعمدة بالترتيب: الاسم، الهاتف، المنطقة، العنوان، المبلغ، الملاحظات، الدفع (cod/prepaid)، عدد القطع. الحد 50 أوردر في الملف.</p><div class="field"><label for="storeSheet">ملف الأوردرات</label><input id="storeSheet" type="file" accept=".xlsx,.xls,.csv"></div><div id="storeSheetPreview"></div><button id="importStoreSheet" class="btn btn-blue" type="button" disabled>إنشاء الأوردرات من الملف</button></div>`
+  let aiPhotoFile=null
+  let aiPreviewUrl=''
+  const aiFieldMap={
+    customer_name:'#soName',customer_phone:'#soPhone',area:'#soArea',address:'#soAddress',
+    amount_to_collect:'#soAmount',payment_type:'#soPayment',parcel_count:'#soParcels',
+    priority:'#soPriority',notes:'#soNotes'
+  }
+  const clearAiReview=()=>Object.values(aiFieldMap).forEach(sel=>qs(sel)?.classList.remove('ai-review'))
+  const resetAiPhoto=()=>{
+    aiPhotoFile=null
+    if(aiPreviewUrl){URL.revokeObjectURL(aiPreviewUrl);aiPreviewUrl=''}
+    qs('#aiOrderPhoto').value=''
+    qs('#aiPhotoPreviewWrap').className='ai-photo-preview empty-preview'
+    qs('#aiPhotoPreviewWrap').innerHTML='<span>معاينة الصورة تظهر هنا</span>'
+    qs('#analyzeOrderPhoto').disabled=true
+    qs('#clearOrderPhoto').disabled=true
+    qs('#aiOrderResult').innerHTML=''
+    clearAiReview()
+  }
+  qs('#aiOrderPhoto').onchange=e=>{
+    const file=e.target.files?.[0]
+    if(!file)return resetAiPhoto()
+    if(!String(file.type||'').startsWith('image/')){toast('اختر صورة فقط','error');return resetAiPhoto()}
+    if(file.size>14*1024*1024){toast('الصورة أكبر من 14MB. اختر صورة أصغر','error');return resetAiPhoto()}
+    aiPhotoFile=file
+    if(aiPreviewUrl)URL.revokeObjectURL(aiPreviewUrl)
+    aiPreviewUrl=URL.createObjectURL(file)
+    qs('#aiPhotoPreviewWrap').className='ai-photo-preview'
+    qs('#aiPhotoPreviewWrap').innerHTML=`<img src="${aiPreviewUrl}" alt="صورة ورقة الأوردر"><span>${esc(file.name||'صورة الأوردر')}</span>`
+    qs('#analyzeOrderPhoto').disabled=false
+    qs('#clearOrderPhoto').disabled=false
+    qs('#aiOrderResult').innerHTML='<div class="ai-ready">جاهز للتحليل. اضغط «تحليل الصورة».</div>'
+  }
+  qs('#clearOrderPhoto').onclick=resetAiPhoto
+  qs('#analyzeOrderPhoto').onclick=async()=>{
+    if(!aiPhotoFile)return
+    const button=qs('#analyzeOrderPhoto')
+    try{
+      button.disabled=true;button.textContent='جاري قراءة الورقة بالذكاء الاصطناعي...'
+      qs('#aiOrderResult').innerHTML='<div class="ai-working"><span class="ai-spinner"></span><div><strong>جاري تحليل الصورة</strong><small>قراءة الاسم والرقم والمنطقة والعنوان والمبلغ...</small></div></div>'
+      clearAiReview()
+      const image_data_url=await prepareOrderPhoto(aiPhotoFile)
+      const token=session?.access_token
+      if(!token)throw new Error('انتهت جلسة الدخول. سجّل الدخول من جديد')
+      const response=await fetch(`${SUPABASE_URL}/functions/v1/analyze-order-photo`,{
+        method:'POST',
+        headers:{'content-type':'application/json','apikey':SUPABASE_PUBLISHABLE_KEY,'authorization':`Bearer ${token}`},
+        body:JSON.stringify({image_data_url,store_id:qs('#soStore').value})
+      })
+      const payload=await response.json().catch(()=>({}))
+      if(!response.ok){
+        const errors={
+          ai_not_configured:'ميزة الذكاء الاصطناعي جاهزة لكن مفتاح OpenAI غير مضاف إلى Supabase بعد.',
+          ai_analysis_failed:'تعذر تحليل الصورة الآن. جرّب صورة أوضح أو حاول مرة ثانية.',
+          invalid_image:'صيغة الصورة غير مدعومة. استخدم JPG أو PNG.',
+          image_too_large:'الصورة كبيرة جداً للتحليل.',
+          not_allowed:'حسابك غير مخول لاستخدام التحليل.',
+          store_not_allowed:'هذا المحل غير مربوط بحسابك.'
+        }
+        throw new Error(errors[payload?.error]||payload?.error||'تعذر تحليل الصورة')
+      }
+      const o=payload?.order||{}
+      const apply=(key,value)=>{
+        const el=qs(aiFieldMap[key]);if(!el||value===null||value===undefined||value==='')return
+        el.value=String(value)
+      }
+      apply('customer_name',o.customer_name)
+      apply('customer_phone',o.customer_phone?normalizeJordanPhone(o.customer_phone):null)
+      apply('area',o.area)
+      apply('address',o.address)
+      apply('amount_to_collect',o.amount_to_collect)
+      apply('payment_type',o.payment_type)
+      apply('parcel_count',o.parcel_count)
+      apply('priority',o.priority)
+      apply('notes',o.notes)
+      if(o.payment_type==='prepaid'){qs('#soPayment').value='prepaid';qs('#soAmount').value='0'}
+      else if(o.payment_type==='cod')qs('#soPayment').value='cod'
+      qs('#soPayment').onchange()
+      quote()
+
+      const uncertain=new Set(o.uncertain_fields||[])
+      Object.entries(o.confidence||{}).forEach(([key,val])=>{if(Number(val)<.7)uncertain.add(key)})
+      uncertain.forEach(key=>qs(aiFieldMap[key])?.classList.add('ai-review'))
+
+      const fieldNames={customer_name:'اسم الزبون',customer_phone:'رقم الهاتف',area:'المنطقة',address:'العنوان',amount_to_collect:'المبلغ',payment_type:'طريقة الدفع',parcel_count:'عدد القطع',priority:'الأولوية',notes:'الملاحظات'}
+      const warnings=[...(o.warnings||[])]
+      if(uncertain.size)warnings.unshift(`راجع الحقول: ${[...uncertain].map(x=>fieldNames[x]||x).join('، ')}`)
+      qs('#aiOrderResult').innerHTML=`<div class="ai-success">
+        <div class="ai-success-head"><span>✓ تم تحليل الورقة وتعبئة النموذج</span><b>ثقة ${aiPct(o.overall_confidence)}</b></div>
+        ${warnings.length?`<div class="ai-warnings">${warnings.map(w=>`<span>⚠️ ${esc(w)}</span>`).join('')}</div>`:''}
+        ${o.raw_text?`<details><summary>النص المقروء من الصورة</summary><p>${esc(o.raw_text)}</p></details>`:''}
+        <small>راجع البيانات، خصوصاً الحقول ذات الإطار البرتقالي، ثم اضغط «إنشاء الطلب والـQR».</small>
+      </div>`
+      qs('#soPhone').dispatchEvent(new Event('blur'))
+      qs('#storeOrderForm').scrollIntoView({behavior:'smooth',block:'start'})
+      toast('تمت قراءة الورقة وتعبئة البيانات')
+    }catch(x){
+      qs('#aiOrderResult').innerHTML=`<div class="ai-error">⚠️ ${esc(errText(x))}</div>`
+      toast(errText(x),'error')
+    }finally{
+      button.disabled=!aiPhotoFile
+      button.textContent='✨ تحليل الصورة وملء البيانات'
+    }
+  }
+  Object.values(aiFieldMap).forEach(sel=>qs(sel)?.addEventListener('input',e=>e.currentTarget.classList.remove('ai-review')))
   const quote=()=>{
     const store=owned.find(s=>s.id===qs('#soStore').value),area=qs('#soArea').value.trim().toLocaleLowerCase('ar')
     const exact=(rates||[]).find(r=>r.store_id===store?.id&&r.area.trim().toLocaleLowerCase('ar')===area)
