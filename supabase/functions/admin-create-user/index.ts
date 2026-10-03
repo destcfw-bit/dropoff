@@ -137,4 +137,3 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : 'server_error' }), { status: 500, headers: cors })
   }
 })
-
