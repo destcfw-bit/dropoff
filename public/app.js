@@ -607,11 +607,130 @@ async function renderStoreNew(){
 
 function renderAdd(){
   if(!stores.length){qs('#content').innerHTML='<div class="panel"><div class="empty">أضف محل أولاً.</div></div>';return}
-  qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>إضافة دفعة أوردرات</h3><span class="muted">اختَر المحل وعدد الأوردرات</span></div>
+  qs('#content').innerHTML=`<div class="panel ai-order-panel">
+    <div class="panel-head"><div><h3>📸 إضافة أوردر بالتصوير — الإدارة</h3><span class="muted">اختَر المحل، صوّر ورقة الأوردر، والذكاء الاصطناعي يجهّز أول صف تلقائياً للمراجعة قبل الحفظ.</span></div><span class="badge purple">AI</span></div>
+    <div class="form-grid"><div class="field"><label>المحل المطلوب</label><select id="adminAiStore">${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div></div>
+    <div class="ai-order-grid">
+      <label class="ai-photo-drop" for="adminAiOrderPhoto">
+        <input id="adminAiOrderPhoto" type="file" accept="image/*" capture="environment" hidden>
+        <span class="ai-camera">📷</span>
+        <strong>التقاط صورة أو اختيار صورة</strong>
+        <small>صوّر الورقة كاملة وبإضاءة واضحة للحصول على أفضل نتيجة</small>
+      </label>
+      <div id="adminAiPhotoPreviewWrap" class="ai-photo-preview empty-preview"><span>معاينة الصورة تظهر هنا</span></div>
+      <div class="ai-order-actions">
+        <button id="adminAnalyzeOrderPhoto" class="btn btn-blue" type="button" disabled>✨ تحليل الصورة وتجهيز الأوردر</button>
+        <button id="adminClearOrderPhoto" class="btn btn-ghost" type="button" disabled>مسح الصورة</button>
+        <small class="muted">بعد التحليل يتم تجهيز صف واحد بالبيانات المقروءة. راجع الحقول ذات الإطار البرتقالي قبل الحفظ.</small>
+      </div>
+    </div>
+    <div id="adminAiOrderResult" class="ai-order-result" role="status" aria-live="polite"></div>
+  </div>
+  <div class="panel"><div class="panel-head"><h3>إضافة دفعة أوردرات</h3><span class="muted">اختَر المحل وعدد الأوردرات</span></div>
     <div class="form-grid"><div class="field"><label>المحل</label><select id="batchStore">${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div><div class="field"><label>عدد الأوردرات</label><input id="batchCount" type="number" min="1" max="50" value="5"></div><div class="field"><label>&nbsp;</label><button id="buildRows" class="btn btn-blue">تجهيز الصفوف</button></div></div>
     <div class="field"><label>استيراد Excel أو CSV: الاسم، الهاتف، المنطقة، العنوان، المبلغ، الملاحظات، طريقة الدفع، عدد القطع</label><input id="csvOrders" type="file" accept=".csv,.xlsx,.xls,text/csv"></div>
     <div id="orderRows"></div><button id="saveBatch" class="btn btn-primary">حفظ الأوردرات وإنشاء QR</button>
   </div><div id="createdQr" style="margin-top:14px"></div>`
+  let adminAiPhotoFile=null
+  let adminAiPreviewUrl=''
+  const clearAdminAiReview=()=>qsa('.order-row input,.order-row select').forEach(el=>el.classList.remove('ai-review'))
+  const resetAdminAiPhoto=()=>{
+    adminAiPhotoFile=null
+    if(adminAiPreviewUrl){URL.revokeObjectURL(adminAiPreviewUrl);adminAiPreviewUrl=''}
+    qs('#adminAiOrderPhoto').value=''
+    qs('#adminAiPhotoPreviewWrap').className='ai-photo-preview empty-preview'
+    qs('#adminAiPhotoPreviewWrap').innerHTML='<span>معاينة الصورة تظهر هنا</span>'
+    qs('#adminAnalyzeOrderPhoto').disabled=true
+    qs('#adminClearOrderPhoto').disabled=true
+    qs('#adminAiOrderResult').innerHTML=''
+    clearAdminAiReview()
+  }
+  qs('#adminAiOrderPhoto').onchange=e=>{
+    const file=e.target.files?.[0]
+    if(!file)return resetAdminAiPhoto()
+    if(!String(file.type||'').startsWith('image/')){toast('اختر صورة فقط','error');return resetAdminAiPhoto()}
+    if(file.size>14*1024*1024){toast('الصورة أكبر من 14MB. اختر صورة أصغر','error');return resetAdminAiPhoto()}
+    adminAiPhotoFile=file
+    if(adminAiPreviewUrl)URL.revokeObjectURL(adminAiPreviewUrl)
+    adminAiPreviewUrl=URL.createObjectURL(file)
+    qs('#adminAiPhotoPreviewWrap').className='ai-photo-preview'
+    qs('#adminAiPhotoPreviewWrap').innerHTML=`<img src="${adminAiPreviewUrl}" alt="صورة ورقة الأوردر"><span>${esc(file.name||'صورة الأوردر')}</span>`
+    qs('#adminAnalyzeOrderPhoto').disabled=false
+    qs('#adminClearOrderPhoto').disabled=false
+    qs('#adminAiOrderResult').innerHTML='<div class="ai-ready">جاهز للتحليل. اضغط «تحليل الصورة وتجهيز الأوردر».</div>'
+  }
+  qs('#adminClearOrderPhoto').onclick=resetAdminAiPhoto
+  qs('#adminAiStore').onchange=()=>{if(qs('#batchStore'))qs('#batchStore').value=qs('#adminAiStore').value}
+  qs('#adminAnalyzeOrderPhoto').onclick=async()=>{
+    if(!adminAiPhotoFile)return
+    const button=qs('#adminAnalyzeOrderPhoto')
+    try{
+      button.disabled=true;button.textContent='جاري قراءة الورقة بالذكاء الاصطناعي...'
+      qs('#adminAiOrderResult').innerHTML='<div class="ai-working"><span class="ai-spinner"></span><div><strong>جاري تحليل الصورة</strong><small>قراءة الاسم والرقم والمنطقة والعنوان والمبلغ...</small></div></div>'
+      clearAdminAiReview()
+      const image_data_url=await prepareOrderPhoto(adminAiPhotoFile)
+      const token=session?.access_token
+      if(!token)throw new Error('انتهت جلسة الدخول. سجّل الدخول من جديد')
+      const response=await fetch(`${SUPABASE_URL}/functions/v1/analyze-order-photo`,{
+        method:'POST',
+        headers:{'content-type':'application/json','apikey':SUPABASE_PUBLISHABLE_KEY,'authorization':`Bearer ${token}`},
+        body:JSON.stringify({image_data_url,store_id:qs('#adminAiStore').value})
+      })
+      const payload=await response.json().catch(()=>({}))
+      if(!response.ok){
+        const errors={
+          ai_not_configured:'ميزة الذكاء الاصطناعي جاهزة لكن مفتاح OpenAI غير مضاف إلى Supabase بعد.',
+          ai_analysis_failed:'تعذر تحليل الصورة الآن. جرّب صورة أوضح أو حاول مرة ثانية.',
+          invalid_image:'صيغة الصورة غير مدعومة. استخدم JPG أو PNG.',
+          image_too_large:'الصورة كبيرة جداً للتحليل.',
+          not_allowed:'حسابك غير مخول لاستخدام التحليل.'
+        }
+        throw new Error(errors[payload?.error]||payload?.error||'تعذر تحليل الصورة')
+      }
+      const o=payload?.order||{}
+      qs('#batchStore').value=qs('#adminAiStore').value
+      qs('#batchCount').value='1'
+      buildRows()
+      const row=qs('.order-row')
+      const set=(key,value)=>{
+        const el=qs(`[data-f="${key}"]`,row)
+        if(!el||value===null||value===undefined||value==='')return
+        el.value=String(value)
+      }
+      set('customer_name',o.customer_name)
+      set('customer_phone',o.customer_phone?normalizeJordanPhone(o.customer_phone):null)
+      set('area',o.area)
+      set('address',o.address)
+      set('amount_to_collect',o.payment_type==='prepaid'?0:o.amount_to_collect)
+      set('payment_type',o.payment_type||'cod')
+      set('parcel_count',o.parcel_count||1)
+      set('priority',o.priority||'normal')
+      set('notes',o.notes)
+
+      const fieldNames={customer_name:'اسم الزبون',customer_phone:'رقم الهاتف',area:'المنطقة',address:'العنوان',amount_to_collect:'المبلغ',payment_type:'طريقة الدفع',parcel_count:'عدد القطع',priority:'الأولوية',notes:'الملاحظات'}
+      const uncertain=new Set(o.uncertain_fields||[])
+      Object.entries(o.confidence||{}).forEach(([key,val])=>{if(Number(val)<.7)uncertain.add(key)})
+      uncertain.forEach(key=>qs(`[data-f="${key}"]`,row)?.classList.add('ai-review'))
+      const warnings=[...(o.warnings||[])]
+      if(uncertain.size)warnings.unshift(`راجع الحقول: ${[...uncertain].map(x=>fieldNames[x]||x).join('، ')}`)
+
+      qs('#adminAiOrderResult').innerHTML=`<div class="ai-success">
+        <div class="ai-success-head"><span>✓ تم تجهيز أوردر واحد في الجدول بالأسفل</span><b>ثقة ${aiPct(o.overall_confidence)}</b></div>
+        ${warnings.length?`<div class="ai-warnings">${warnings.map(w=>`<span>⚠️ ${esc(w)}</span>`).join('')}</div>`:''}
+        ${o.raw_text?`<details><summary>النص المقروء من الصورة</summary><p>${esc(o.raw_text)}</p></details>`:''}
+        <small>راجع الصف ثم اضغط «حفظ الأوردرات وإنشاء QR».</small>
+      </div>`
+      qs('#orderRows').scrollIntoView({behavior:'smooth',block:'center'})
+      toast('تم تحليل الورقة وتجهيز الأوردر')
+    }catch(x){
+      qs('#adminAiOrderResult').innerHTML=`<div class="ai-error">⚠️ ${esc(errText(x))}</div>`
+      toast(errText(x),'error')
+    }finally{
+      button.disabled=!adminAiPhotoFile
+      button.textContent='✨ تحليل الصورة وتجهيز الأوردر'
+    }
+  }
+
   qs('#buildRows').onclick=buildRows
   qs('#saveBatch').onclick=saveBatch
   qs('#csvOrders').onchange=async e=>{
