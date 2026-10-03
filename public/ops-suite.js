@@ -68,12 +68,13 @@ export async function renderOpsSuite(ctx){
 }
 
 async function renderOverview(ctx,body){
-  const [{data:metrics},{count:exceptions},{data:flags},{data:backup},{data:close}]=await Promise.all([
+  const [{data:metrics},{count:exceptions},{data:flags},{data:backup},{data:close},{data:cash}]=await Promise.all([
     ctx.supabase.from('daily_ops_metrics').select('*').maybeSingle(),
     ctx.supabase.from('order_exceptions').select('id',{count:'exact',head:true}).is('resolved_at',null),
     ctx.supabase.from('feature_flags').select('key,enabled,description').is('store_id',null).order('key'),
     ctx.supabase.from('backup_snapshots').select('snapshot_date,created_at').order('created_at',{ascending:false}).limit(1),
-    ctx.supabase.from('accounting_closures').select('business_date,closed_at,cash_shortage').order('closed_at',{ascending:false}).limit(1)
+    ctx.supabase.from('accounting_closures').select('business_date,closed_at,cash_shortage').order('closed_at',{ascending:false}).limit(1),
+    ctx.supabase.from('captain_cash_summary').select('captain_id,full_name,cash_collected,cash_handed_over,cash_due').order('cash_due',{ascending:false}).limit(20)
   ])
   const m=metrics||{}
   body.innerHTML=`
@@ -90,6 +91,10 @@ async function renderOverview(ctx,body){
     <section class="ops-section ops-ai">
       <div class="ops-section-head"><div><h3>🤖 ملخص اليوم الذكي</h3><p class="muted">يُحفظ مرة واحدة لليوم ويمكن تحديثه يدوياً.</p></div>${button('تحديث الملخص','btn btn-blue','id="refreshDailySummary"')}</div>
       <div id="dailySummary"><div class="ops-empty">جاري تجهيز الملخص...</div></div>
+    </section>
+    <section class="ops-section">
+      <div class="ops-section-head"><div><h3>💵 عهدة الكباتن</h3><p class="muted">الكاش المحصّل، المسلم للمحاسب، والمتبقي على كل كابتن.</p></div><span class="ops-chip">${(cash||[]).filter(x=>Number(x.cash_due||0)>0).length} عليهم عهدة</span></div>
+      <div class="ops-list">${(cash||[]).map(x=>`<div class="ops-list-row"><div><strong>${esc(x.full_name||'كابتن')}</strong><small>محصّل ${money(x.cash_collected)} · سلّم ${money(x.cash_handed_over)}</small></div><span class="ops-chip ${Number(x.cash_due||0)>0?'warn':'good'}">المتبقي ${money(x.cash_due)}</span></div>`).join('')||'<div class="ops-empty">لا توجد عهد كباتن.</div>'}</div>
     </section>
     <section class="ops-section">
       <div class="ops-section-head"><h3>حالة المزايا</h3><span class="ops-chip">${flags?.length||0} ميزة</span></div>
@@ -125,7 +130,7 @@ async function renderExceptions(ctx,body){
   const load=async()=>{
     const out=$('#exceptionList',body);out.innerHTML='<div class="ops-empty">جاري التحميل...</div>'
     const {data,error}=await ctx.supabase.from('order_exceptions')
-      .select('id,reason,next_action,resolved_at,created_at,order_id,orders(order_code,area,status,customer_phone,stores(name)),profiles:owner_id(full_name)')
+      .select('id,reason,next_action,resolved_at,created_at,order_id,orders(order_code,area,status,customer_phone,stores(name))')
       .is('resolved_at',null).order('created_at',{ascending:false}).limit(200)
     if(error)throw error
     out.innerHTML=data?.length?`<div class="ops-list">${data.map(e=>`<div class="ops-list-row">
