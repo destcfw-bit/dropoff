@@ -134,6 +134,18 @@ Deno.serve(async (req) => {
       if (!membership) return json({ error: 'store_not_allowed' }, 403)
     }
 
+    const [{data:storeInfo},{data:knownRates}] = await Promise.all([
+      admin.from('stores').select('name').eq('id',storeId).maybeSingle(),
+      admin.from('area_rates').select('area').or(`store_id.eq.${storeId},store_id.is.null`).order('area').limit(200)
+    ])
+    const knownAreas=[...new Set((knownRates||[]).map((r:any)=>String(r.area||'').trim()).filter(Boolean))]
+    const contextualInstructions = instructions + `
+سياق إضافي:
+- اسم المحل: ${storeInfo?.name||'غير محدد'}.
+- المناطق المعروفة في نظام Drop Off لهذا المحل/النظام: ${knownAreas.join('، ')||'لا توجد قائمة'}.
+- إذا كانت المنطقة المكتوبة قريبة جداً وواضحة من اسم موجود في القائمة، استخدم الاسم القياسي من القائمة. لا تفعل ذلك إذا كانت القراءة غير مؤكدة.
+`
+
     const apiKey = Deno.env.get('OPENAI_API_KEY')
     if (!apiKey) return json({ error: 'ai_not_configured' }, 503)
 
@@ -145,7 +157,7 @@ Deno.serve(async (req) => {
       input: [{
         role: 'user',
         content: [
-          { type: 'input_text', text: instructions },
+          { type: 'input_text', text: contextualInstructions },
           { type: 'input_image', image_url: imageDataUrl, detail: 'high' }
         ]
       }]
@@ -187,10 +199,16 @@ Deno.serve(async (req) => {
     if (!text) return json({ error: 'empty_ai_result' }, 502)
 
     const parsed = parseJsonText(text)
+    const arabicDigits=(v:any)=>String(v??'').replace(/[٠-٩]/g,(d:string)=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    let parsedArea=parsed.area==null?null:String(parsed.area).trim()
+    if(parsedArea){
+      const exact=knownAreas.find(a=>a.toLocaleLowerCase('ar')===parsedArea!.toLocaleLowerCase('ar'))
+      if(exact)parsedArea=exact
+    }
     const safe = {
       customer_name: parsed.customer_name ?? null,
-      customer_phone: parsed.customer_phone ?? null,
-      area: parsed.area ?? null,
+      customer_phone: parsed.customer_phone==null?null:arabicDigits(parsed.customer_phone),
+      area: parsedArea,
       address: parsed.address ?? null,
       amount_to_collect: Number.isFinite(Number(parsed.amount_to_collect)) ? Number(parsed.amount_to_collect) : null,
       payment_type: ['cod','prepaid'].includes(parsed.payment_type) ? parsed.payment_type : null,
