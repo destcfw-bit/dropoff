@@ -164,7 +164,7 @@ async function renderWarehouse(ctx,body){
       <div class="ops-section-head"><div><h3>📦 وضع المسح السريع</h3><p class="muted">امسح/اكتب رقم الأوردر أو QR ثم اختر الحركة. مناسب للباركود سكانر بدون ماوس.</p></div></div>
       <div class="ops-scan-box">
         <div><label>الكود</label><input id="scanCode" class="ops-input" autofocus placeholder="DO-000001 أو QR"></div>
-        <div><label>الحركة</label><select id="scanAction" class="ops-select"><option value="warehouse_in">دخول المخزن</option><option value="assign_shelf">تحديد رف</option><option value="warehouse_out">خروج للتوصيل</option><option value="return_in">دخول مرتجع</option><option value="return_store">تسليم مرتجع للمحل</option></select></div>
+        <div><label>الحركة</label><select id="scanAction" class="ops-select"><option value="pickup">استلام من المحل</option><option value="warehouse_in">دخول المخزن</option><option value="assign_shelf">تحديد رف</option><option value="warehouse_out">خروج للتوصيل</option><option value="delivery">تم التسليم</option><option value="return_in">دخول مرتجع</option><option value="return_store">تسليم مرتجع للمحل</option></select></div>
         <div><label>الرف</label><select id="scanShelf" class="ops-select"><option value="">بدون رف</option>${(shelves||[]).filter(x=>x.active).map(s=>`<option value="${esc(s.code)}">${esc(s.code)} · ${esc(s.zone||'')}</option>`).join('')}</select></div>
         ${button('تنفيذ','btn btn-primary','id="doScan"')}
       </div>
@@ -267,18 +267,19 @@ async function renderIntegrations(ctx,body){
         <select id="prBranch" class="ops-select"><option value="">كل الفروع</option>${(branches||[]).map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select>
         <input id="prArea" class="ops-input" placeholder="المنطقة أو فارغ">
         <select id="prService" class="ops-select"><option value="standard">Standard</option><option value="same_day">Same Day</option><option value="express">Express</option><option value="pickup_only">Pickup Only</option><option value="return">Return</option></select>
+        <select id="prSize" class="ops-select"><option value="">كل الأحجام</option><option value="small">صغير</option><option value="medium">متوسط</option><option value="large">كبير</option><option value="xl">XL</option></select>
         <input id="prFee" class="ops-input" type="number" step=".01" min="0" required placeholder="رسم التوصيل">
         <input id="prReturn" class="ops-input" type="number" step=".01" min="0" value="0" placeholder="رسم المرتجع">
         <button class="btn btn-primary">إضافة قاعدة</button>
       </form>
-      <div class="ops-list" style="margin-top:12px">${(rules||[]).map(r=>`<div class="ops-list-row"><div><strong>${esc(r.stores?.name||'كل المحلات')} · ${esc(r.area||'كل المناطق')} · ${esc(r.service_type)}</strong><small>${esc(r.branches?.name||'كل الفروع')} · ${r.min_parcels}-${r.max_parcels} قطعة</small></div><div class="ops-actions"><span class="ops-chip good">${money(r.delivery_fee)}</span>${button('حذف','btn btn-sm btn-red',`data-del-rule="${r.id}"`)}</div></div>`).join('')||'<div class="ops-empty">لا توجد قواعد خاصة.</div>'}</div>
+      <div class="ops-list" style="margin-top:12px">${(rules||[]).map(r=>`<div class="ops-list-row"><div><strong>${esc(r.stores?.name||'كل المحلات')} · ${esc(r.area||'كل المناطق')} · ${esc(r.service_type)}</strong><small>${esc(r.branches?.name||'كل الفروع')} · ${r.min_parcels}-${r.max_parcels} قطعة · ${esc(r.package_size||'كل الأحجام')}</small></div><div class="ops-actions"><span class="ops-chip good">${money(r.delivery_fee)}</span>${button('حذف','btn btn-sm btn-red',`data-del-rule="${r.id}"`)}</div></div>`).join('')||'<div class="ops-empty">لا توجد قواعد خاصة.</div>'}</div>
     </section>
     <section class="ops-section">
       <div class="ops-section-head"><div><h3>🔌 API للمحلات الكبيرة</h3><p class="muted">المفتاح يظهر مرة واحدة عند الإنشاء. لا تشاركه علناً.</p></div></div>
       <div class="ops-toolbar"><select id="apiStore" class="ops-select">${ctx.stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><input id="apiLabel" class="ops-input" value="Main API" placeholder="اسم المفتاح">${button('إنشاء API Key','btn btn-blue','id="createApiKey"')}</div>
       <div id="apiKeyOnce"></div>
       <div class="ops-list" style="margin-top:12px">${(keys||[]).map(k=>`<div class="ops-list-row"><div><strong>${esc(k.stores?.name||'')} · ${esc(k.label||'API')}</strong><small>${esc(k.key_prefix)}… · آخر استخدام ${fmt(k.last_used_at)}</small></div><div class="ops-actions"><span class="ops-chip ${k.active?'good':'bad'}">${k.active?'فعال':'موقوف'}</span>${k.active?button('إلغاء','btn btn-sm btn-red',`data-revoke-key="${k.id}"`):''}</div></div>`).join('')||'<div class="ops-empty">لا توجد مفاتيح API.</div>'}</div>
-      <div class="ops-code" style="margin-top:10px">POST ${ctx.supabaseUrl}/functions/v1/store-api-order<br>x-api-key: do_live_...<br>{ "customer_name":"Ahmad", "customer_phone":"079...", "area":"خلدا", "address":"...", "amount_to_collect":15 }</div>
+      <div class="ops-code" style="margin-top:10px">POST ${ctx.supabaseUrl}/functions/v1/store-api-order<br>x-api-key: do_live_...<br>{ "customer_name":"Ahmad", "customer_phone":"079...", "area":"خلدا", "address":"...", "amount_to_collect":15, "service_type":"express", "package_size":"medium" }</div>
     </section>
     <section class="ops-section">
       <div class="ops-section-head"><h3>🏷️ مخزون الاستكرات</h3>${button('فتح شاشة الطباعة','btn btn-ghost','id="goStickers"')}</div>
@@ -286,7 +287,7 @@ async function renderIntegrations(ctx,body){
     </section>`
   $('#pricingForm',body).onsubmit=async e=>{
     e.preventDefault()
-    const payload={store_id:$('#prStore',body).value||null,branch_id:$('#prBranch',body).value||null,area:$('#prArea',body).value.trim()||null,service_type:$('#prService',body).value,delivery_fee:Number($('#prFee',body).value),return_fee:Number($('#prReturn',body).value||0),created_by:ctx.profile.id}
+    const payload={store_id:$('#prStore',body).value||null,branch_id:$('#prBranch',body).value||null,area:$('#prArea',body).value.trim()||null,service_type:$('#prService',body).value,package_size:$('#prSize',body).value||null,delivery_fee:Number($('#prFee',body).value),return_fee:Number($('#prReturn',body).value||0),created_by:ctx.profile.id}
     const {error}=await ctx.supabase.from('pricing_rules').insert(payload)
     if(error)return ctx.toast(error.message,'error');ctx.toast('تمت إضافة قاعدة التسعير');renderIntegrations(ctx,body)
   }
