@@ -25,7 +25,7 @@ Deno.serve(async req=>{
     const {data:u}=await admin.auth.getUser(token)
     if(!u?.user)return reply({error:'unauthorized'},401)
     const {data:p}=await admin.from('profiles').select('role,active').eq('id',u.user.id).single()
-    if(!p?.active||p.role!=='admin')return reply({error:'admin_only'},403)
+    if(!p?.active||!['owner','admin'].includes(p.role))return reply({error:'admin_only'},403)
     const body=await req.json()
     const storeId=String(body.store_id||'')
     const label=String(body.label||'API').trim().slice(0,100)
