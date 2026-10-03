@@ -376,7 +376,7 @@ async function flushOfflineStoreOrders(){
   const keep=[];let sent=0
   for(const item of q){
     const p=item.payload||{}
-    const {error}=await supabase.rpc('store_create_order_auto',p)
+    const {error}=await supabase.rpc('store_create_order_auto_v2',p)
     if(error)keep.push(item);else sent++
   }
   writeOfflineStoreOrders(keep)
@@ -469,6 +469,7 @@ async function renderStoreNew(){
       <div class="field"><label for="soPayment">الدفع</label><select id="soPayment"><option value="cod">عند التسليم</option><option value="prepaid">مدفوع مسبقاً</option></select></div>
       <div class="field"><label for="soParcels">عدد القطع</label><input id="soParcels" type="number" min="1" max="100" value="1" required></div>
       <div class="field"><label for="soPriority">الأولوية</label><select id="soPriority"><option value="normal">عادي</option><option value="urgent">مستعجل</option></select></div>
+      <div class="field"><label for="soService">نوع الخدمة</label><select id="soService"><option value="standard">Standard · عادي</option><option value="same_day">Same Day · نفس اليوم</option><option value="express">Express · سريع</option><option value="pickup_only">Pickup Only · استلام فقط</option><option value="return">Return · مرتجع</option></select></div>
       <div class="field"><label for="soNotes">ملاحظات</label><textarea id="soNotes" maxlength="2000" placeholder="تفاصيل إضافية"></textarea></div>
       <div class="field"><label>&nbsp;</label><button class="btn btn-primary" type="submit">✓ إنشاء الطلب والـQR</button></div>
     </form><div id="storeOrderResult" role="status" aria-live="polite"></div></div>
@@ -596,7 +597,7 @@ async function renderStoreNew(){
     qs('#soStore').value=o.store_id;qs('#soName').value=o.customer_name||'';qs('#soPhone').value=o.customer_phone||''
     qs('#soArea').value=o.area||'';qs('#soAddress').value=o.address||'';qs('#soAmount').value=Number(o.amount_to_collect||0)
     qs('#soPayment').value=o.payment_type||'cod';qs('#soParcels').value=o.parcel_count||1
-    qs('#soPriority').value=o.priority||'normal';qs('#soNotes').value=o.notes||''
+    qs('#soPriority').value=o.priority||'normal';qs('#soService').value=o.service_type||'standard';qs('#soNotes').value=o.notes||''
     qs('#soPayment').onchange();quote();toast('تم نسخ بيانات الأوردر؛ راجعها ثم اضغط إنشاء')
   }
   qs('#storeTemplate').onclick=()=>downloadCsv(['الاسم','الهاتف','المنطقة','العنوان','المبلغ','الملاحظات','الدفع','عدد القطع'],[['زبون مثال','0791234567','عمّان','الشارع والعمارة',10,'','cod',1]],'dropoff-store-orders-template.csv')
@@ -623,7 +624,7 @@ async function renderStoreNew(){
     const button=qs('#importStoreSheet'),storeId=qs('#soStore').value
     button.disabled=true;let created=0;const failed=[]
     for(const row of importedRows){
-      const {error:e}=await supabase.rpc('store_create_order_auto',{p_store_id:storeId,p_customer_name:row.name,p_customer_phone:row.phone,p_area:row.area,p_address:row.address,p_amount_to_collect:row.payment==='prepaid'?0:row.amount,p_payment_type:row.payment,p_parcel_count:row.parcels,p_priority:'normal',p_notes:row.notes||null})
+      const {error:e}=await supabase.rpc('store_create_order_auto_v2',{p_store_id:storeId,p_customer_name:row.name,p_customer_phone:row.phone,p_area:row.area,p_address:row.address,p_amount_to_collect:row.payment==='prepaid'?0:row.amount,p_payment_type:row.payment,p_parcel_count:row.parcels,p_priority:'normal',p_notes:row.notes||null,p_service_type:'standard'})
       if(e)failed.push(row.line);else created++
       qs('#storeSheetPreview').textContent=`تم إنشاء ${created} من ${importedRows.length} أوردر...`
     }
@@ -641,7 +642,7 @@ async function renderStoreNew(){
         p_area:qs('#soArea').value.trim(),p_address:qs('#soAddress').value.trim(),
         p_amount_to_collect:Number(qs('#soAmount').value||0),p_payment_type:qs('#soPayment').value,
         p_parcel_count:Number(qs('#soParcels').value),p_priority:qs('#soPriority').value,
-        p_notes:qs('#soNotes').value.trim()||null
+        p_notes:qs('#soNotes').value.trim()||null,p_service_type:qs('#soService').value
       }
       const validation=await validateOrderPayload(payload)
       if(validation?.warnings?.length&&!confirm('تنبيهات قبل الحفظ:\n- '+validation.warnings.join('\n- ')+'\n\nهل تريد المتابعة؟')){
@@ -655,7 +656,7 @@ async function renderStoreNew(){
         qs('#storeOrderResult').innerHTML='<div class="created-order"><div><span class="badge orange">⏳ محفوظ Offline</span><h3>بانتظار الإنترنت</h3><p>سيتم إرسال الطلب تلقائياً عند عودة الاتصال.</p></div></div>'
         return
       }
-      const {data:order,error:saveError}=await supabase.rpc('store_create_order_auto',payload)
+      const {data:order,error:saveError}=await supabase.rpc('store_create_order_auto_v2',payload)
       if(saveError)throw saveError
       const o=Array.isArray(order)?order[0]:order
       const qr=await QRCode.toDataURL(o.order_code,{width:180,margin:1})
@@ -842,6 +843,7 @@ function buildRows(){
     <select data-f="payment_type"><option value="cod">تحصيل</option><option value="prepaid">مدفوع</option></select>
     <input data-f="parcel_count" type="number" min="1" max="100" value="1" title="عدد القطع">
     <select data-f="priority"><option value="normal">عادي</option><option value="urgent">مستعجل</option></select>
+    <select data-f="service_type"><option value="standard">Standard</option><option value="same_day">Same Day</option><option value="express">Express</option><option value="pickup_only">Pickup Only</option><option value="return">Return</option></select>
     <input data-f="notes" placeholder="ملاحظات">
   </div>`).join('')
 }
@@ -854,7 +856,7 @@ async function saveBatch(){
     const item={
       store_id,customer_name:val('customer_name'),customer_phone:val('customer_phone'),
       area:val('area'),address:val('address'),amount_to_collect:Number(val('amount_to_collect')||0),
-      notes:val('notes')||null,status:'in_warehouse',payment_type:val('payment_type'),parcel_count:Number(val('parcel_count')),priority:val('priority'),delivery_fee:Number(s?.delivery_fee||0),
+      notes:val('notes')||null,status:'in_warehouse',payment_type:val('payment_type'),parcel_count:Number(val('parcel_count')),priority:val('priority'),service_type:val('service_type')||'standard',delivery_fee:Number(s?.delivery_fee||0),
       return_fee:Number(s?.return_fee||0),created_by:profile.id
     }
     if(!item.customer_name||!item.customer_phone||!item.area||!item.address){
