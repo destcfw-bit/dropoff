@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
     if (userErr || !userData?.user) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: cors })
 
     const { data: caller } = await admin.from('profiles').select('role,active').eq('id', userData.user.id).single()
-    if (!caller || caller.role !== 'admin' || caller.active !== true) {
+    if (!caller || !['owner','admin'].includes(caller.role) || caller.active !== true) {
       return new Response(JSON.stringify({ error: 'admin_only' }), { status: 403, headers: cors })
     }
 
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
     const login_type = String(body.login_type || '')
     const login_value = String(body.login_value || '').trim()
     const password = String(body.password || '')
-    const allowedRoles = ['warehouse','pickup_captain','delivery_captain','store_owner','accountant']
+    const allowedRoles = ['manager','warehouse','support','dispatcher','pickup_captain','delivery_captain','store_owner','accountant']
 
     if (!full_name || !allowedRoles.includes(role) || !['phone','username'].includes(login_type) || !login_value || password.length < 6) {
       return new Response(JSON.stringify({ error: 'invalid_input' }), { status: 400, headers: cors })
