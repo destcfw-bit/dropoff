@@ -9,13 +9,15 @@
 
 > Railway is no longer part of the active Drop Off architecture.
 
-## Portals
+## Portals and roles
 
-- `/admin` — الإدارة
-- `/management` — المحاسب والإدارة المالية
-- `/captain` — الكباتن
-- `/store` — المحلات
+- `/admin` — Owner / Admin / Manager / Warehouse / Dispatcher / Support, with role-aware navigation
+- `/management` — Owner / Admin / Accountant
+- `/captain` — Pickup / Delivery captains
+- `/store` — Store owners
 - `/health` — Web health check
+
+Operational roles now include: `owner`, `admin`, `manager`, `warehouse`, `dispatcher`, `support`, `accountant`, `store_owner`, `pickup_captain`, and `delivery_captain`.
 
 ## Order intake
 
@@ -87,6 +89,7 @@ API keys are stored only as SHA-256 hashes in the database.
 - security event stream,
 - generic audit logs for key operational tables,
 - row-level security in Supabase,
+- Owner / Manager / Warehouse / Dispatcher / Support role separation,
 - private order-attachment bucket,
 - fine-grained profile permissions,
 - feature flags for gradual rollouts.
@@ -130,6 +133,11 @@ Important current migrations are tracked under `sql/`, including:
 - `20261003_operating_system_v2_security_backup.sql`
 - `20261003_store_order_service_type_v2.sql`
 - `20261003_package_size_flexible_pricing.sql`
+- `20261003_operating_system_v2_hardening.sql`
+- `20261003_add_operations_roles.sql`
+- `20261003_operational_roles_permissions.sql`
+- `20261003_operational_roles_followup.sql`
+- `20261003_support_order_followup.sql`
 
 They have already been applied to the connected production Supabase project. Do not rerun them manually on that same database.
 
