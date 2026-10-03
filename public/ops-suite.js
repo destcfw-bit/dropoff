@@ -353,6 +353,10 @@ async function renderSystem(ctx,body){
       <div class="ops-section-head"><div><h3>🏢 الفروع</h3><p class="muted">النظام صار جاهز لأكثر من فرع بدون إعادة بناء قاعدة البيانات.</p></div></div>
       <form id="branchForm" class="ops-toolbar"><input id="branchCode" class="ops-input" placeholder="CODE مثل ZARQA" required><input id="branchName" class="ops-input" placeholder="اسم الفرع" required><input id="branchCity" class="ops-input" placeholder="المدينة"><button class="btn btn-blue">إضافة فرع</button></form>
       <div class="ops-list" style="margin-top:10px">${(branches||[]).map(b=>`<div class="ops-list-row"><div><strong>${esc(b.name)} · ${esc(b.code)}</strong><small>${esc(b.city||'')} · ${b.is_default?'الفرع الافتراضي':''}</small></div><span class="ops-chip ${b.active?'good':'bad'}">${b.active?'فعال':'موقوف'}</span></div>`).join('')}</div>
+      <div class="ops-grid" style="margin-top:12px">
+        <div class="ops-card"><h4>تعيين محل لفرع</h4><div class="ops-toolbar"><select id="branchStore" class="ops-select">${ctx.stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="branchStoreTarget" class="ops-select">${(branches||[]).filter(b=>b.active).map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select>${button('حفظ','btn btn-sm btn-blue','id="saveStoreBranch"')}</div></div>
+        <div class="ops-card"><h4>تعيين كابتن لفرع</h4><div class="ops-toolbar"><select id="branchCaptain" class="ops-select">${ctx.captains.map(c=>`<option value="${c.id}">${esc(c.profiles?.full_name||c.profiles?.username||c.id)}</option>`).join('')}</select><select id="branchCaptainTarget" class="ops-select">${(branches||[]).filter(b=>b.active).map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select>${button('حفظ','btn btn-sm btn-blue','id="saveCaptainBranch"')}</div></div>
+      </div>
     </section>
     <section class="ops-section">
       <div class="ops-section-head"><div><h3>💾 النسخ الاحتياطي والاستعادة</h3><p class="muted">نسخة منطقية يومية داخل Supabase لمدة 14 يوم + تنزيل نسخة JSON عند الطلب. يفضّل أيضاً تفعيل Backup خارجي على مستوى السيرفر/قاعدة البيانات.</p></div><div class="ops-actions">${button('إنشاء وتنزيل نسخة الآن','btn btn-primary','id="downloadBackup"')}</div></div>
@@ -379,6 +383,16 @@ async function renderSystem(ctx,body){
     }catch(e){renderError(out,e)}
   }
   $('#branchForm',body).onsubmit=async e=>{e.preventDefault();const {error}=await ctx.supabase.from('branches').insert({code:$('#branchCode',body).value.trim().toUpperCase(),name:$('#branchName',body).value.trim(),city:$('#branchCity',body).value.trim()||null});if(error)return ctx.toast(error.message,'error');ctx.toast('تمت إضافة الفرع');renderSystem(ctx,body)}
+  if($('#branchStore',body)){
+    const store=ctx.stores.find(s=>s.id===$('#branchStore',body).value);if(store?.branch_id)$('#branchStoreTarget',body).value=store.branch_id
+    $('#branchStore',body).onchange=()=>{const s=ctx.stores.find(x=>x.id===$('#branchStore',body).value);if(s?.branch_id)$('#branchStoreTarget',body).value=s.branch_id}
+    $('#saveStoreBranch',body).onclick=async()=>{const id=$('#branchStore',body).value,branch_id=$('#branchStoreTarget',body).value;const {error}=await ctx.supabase.from('stores').update({branch_id}).eq('id',id);if(error)return ctx.toast(error.message,'error');const s=ctx.stores.find(x=>x.id===id);if(s)s.branch_id=branch_id;ctx.toast('تم تعيين المحل للفرع')}
+  }
+  if($('#branchCaptain',body)){
+    const captain=ctx.captains.find(x=>x.id===$('#branchCaptain',body).value);if(captain?.branch_id)$('#branchCaptainTarget',body).value=captain.branch_id
+    $('#branchCaptain',body).onchange=()=>{const x=ctx.captains.find(v=>v.id===$('#branchCaptain',body).value);if(x?.branch_id)$('#branchCaptainTarget',body).value=x.branch_id}
+    $('#saveCaptainBranch',body).onclick=async()=>{const id=$('#branchCaptain',body).value,branch_id=$('#branchCaptainTarget',body).value;const {error}=await ctx.supabase.from('captains').update({branch_id}).eq('id',id);if(error)return ctx.toast(error.message,'error');const x=ctx.captains.find(v=>v.id===id);if(x)x.branch_id=branch_id;ctx.toast('تم تعيين الكابتن للفرع')}
+  }
   $('#downloadBackup',body).onclick=async()=>{
     try{
       const {data:{session}}=await ctx.supabase.auth.getSession()
