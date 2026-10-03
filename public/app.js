@@ -103,6 +103,7 @@ async function login(id,password){
 
 async function init(){
   document.body.dataset.portal=portal()
+  updateNetworkState()
   if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{})
   const {data:{session:s}}=await supabase.auth.getSession()
   session=s
@@ -363,6 +364,46 @@ async function renderStickers(){
   draw()
 }
 
+const OFFLINE_STORE_ORDERS_KEY='dropoff-offline-store-orders-v1'
+function readOfflineStoreOrders(){try{return JSON.parse(localStorage.getItem(OFFLINE_STORE_ORDERS_KEY)||'[]')}catch{return []}}
+function writeOfflineStoreOrders(v){localStorage.setItem(OFFLINE_STORE_ORDERS_KEY,JSON.stringify(v.slice(-100)))}
+function queueOfflineStoreOrder(payload){
+  const q=readOfflineStoreOrders();q.push({id:crypto.randomUUID?.()||String(Date.now()),payload,queued_at:new Date().toISOString()});writeOfflineStoreOrders(q)
+}
+async function flushOfflineStoreOrders(){
+  if(!navigator.onLine||profile?.role!=='store_owner'||!session)return
+  const q=readOfflineStoreOrders();if(!q.length)return
+  const keep=[];let sent=0
+  for(const item of q){
+    const p=item.payload||{}
+    const {error}=await supabase.rpc('store_create_order_auto',p)
+    if(error)keep.push(item);else sent++
+  }
+  writeOfflineStoreOrders(keep)
+  if(sent)toast(`تم إرسال ${sent} طلب محفوظ من وضع Offline`)
+}
+function updateNetworkState(){
+  document.body.classList.toggle('offline',!navigator.onLine)
+  if(navigator.onLine)flushOfflineStoreOrders().catch(()=>{})
+}
+window.addEventListener('online',updateNetworkState)
+window.addEventListener('offline',updateNetworkState)
+
+async function validateOrderPayload(payload){
+  const {data,error}=await supabase.rpc('validate_order_candidate',{
+    p_store_id:payload.p_store_id,
+    p_customer_name:payload.p_customer_name,
+    p_customer_phone:payload.p_customer_phone,
+    p_area:payload.p_area,
+    p_address:payload.p_address,
+    p_amount:Number(payload.p_amount_to_collect||0),
+    p_payment_type:payload.p_payment_type,
+    p_parcel_count:Number(payload.p_parcel_count||1)
+  })
+  if(error)return {ok:true,warnings:[]}
+  return data||{ok:true,warnings:[]}
+}
+
 async function prepareOrderPhoto(file){
   if(!file || !String(file.type||'').startsWith('image/'))throw new Error('اختر صورة واضحة للورقة')
   if(file.size>14*1024*1024)throw new Error('حجم الصورة كبير. الحد الأقصى 14MB قبل الضغط')
@@ -594,14 +635,27 @@ async function renderStoreNew(){
     const b=qs('#storeOrderForm button[type="submit"]')
     try{
       b.disabled=true;b.textContent='جاري إنشاء الطلب...'
-      const {data:order,error:saveError}=await supabase.rpc('store_create_order_auto',{
+      const payload={
         p_store_id:qs('#soStore').value,
         p_customer_name:qs('#soName').value.trim(),p_customer_phone:qs('#soPhone').value.trim(),
         p_area:qs('#soArea').value.trim(),p_address:qs('#soAddress').value.trim(),
         p_amount_to_collect:Number(qs('#soAmount').value||0),p_payment_type:qs('#soPayment').value,
         p_parcel_count:Number(qs('#soParcels').value),p_priority:qs('#soPriority').value,
         p_notes:qs('#soNotes').value.trim()||null
-      })
+      }
+      const validation=await validateOrderPayload(payload)
+      if(validation?.warnings?.length&&!confirm('تنبيهات قبل الحفظ:\n- '+validation.warnings.join('\n- ')+'\n\nهل تريد المتابعة؟')){
+        b.disabled=false;b.textContent='✓ إنشاء الطلب والـQR';return
+      }
+      if(!navigator.onLine){
+        queueOfflineStoreOrder(payload)
+        toast('ما في إنترنت؛ تم حفظ الطلب على الجهاز وسيرسل تلقائياً عند عودة الاتصال')
+        const chosen=qs('#soStore').value
+        qs('#storeOrderForm').reset();qs('#soStore').value=chosen;qs('#soAmount').disabled=false
+        qs('#storeOrderResult').innerHTML='<div class="created-order"><div><span class="badge orange">⏳ محفوظ Offline</span><h3>بانتظار الإنترنت</h3><p>سيتم إرسال الطلب تلقائياً عند عودة الاتصال.</p></div></div>'
+        return
+      }
+      const {data:order,error:saveError}=await supabase.rpc('store_create_order_auto',payload)
       if(saveError)throw saveError
       const o=Array.isArray(order)?order[0]:order
       const qr=await QRCode.toDataURL(o.order_code,{width:180,margin:1})
@@ -810,6 +864,14 @@ async function saveBatch(){
     if(!Number.isInteger(item.parcel_count)||item.parcel_count<1||item.parcel_count>100)return toast('عدد القطع غير صحيح','error')
     items.push(item)
   }
+  const clientWarnings=[]
+  items.forEach((x,i)=>{
+    if(!/^(?:\+9627|07|7)\d{8}$/.test(String(x.customer_phone||'').replace(/[\s\-()]/g,'')))clientWarnings.push(`السطر ${i+1}: راجع رقم الهاتف`)
+    if(String(x.address||'').trim().length<4)clientWarnings.push(`السطر ${i+1}: العنوان قصير`)
+    if(x.payment_type==='cod'&&Number(x.amount_to_collect||0)===0)clientWarnings.push(`السطر ${i+1}: تحصيل بمبلغ صفر`)
+    if(Number(x.amount_to_collect||0)>500)clientWarnings.push(`السطر ${i+1}: مبلغ التحصيل مرتفع`)
+  })
+  if(clientWarnings.length&&!confirm('تنبيهات قبل الحفظ:\n- '+clientWarnings.slice(0,20).join('\n- ')+(clientWarnings.length>20?'\n...':'' )+'\n\nهل تريد المتابعة؟'))return
   const phones=items.map(x=>x.customer_phone)
   if(new Set(phones).size!==phones.length && !confirm('هناك رقم زبون مكرر في الدفعة. هل تريد المتابعة؟'))return
   const {data:recent}=await supabase.from('orders').select('customer_phone').eq('store_id',store_id).gte('created_at',new Date(Date.now()-86400000).toISOString()).in('customer_phone',phones)
