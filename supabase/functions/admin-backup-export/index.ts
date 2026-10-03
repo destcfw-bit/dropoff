@@ -9,7 +9,7 @@ Deno.serve(async req=>{
   const admin=createClient(url,service,{auth:{persistSession:false,autoRefreshToken:false}})
   const {data:u}=await admin.auth.getUser(token);if(!u?.user)return new Response(JSON.stringify({error:'unauthorized'}),{status:401,headers:cors})
   const {data:p}=await admin.from('profiles').select('role,active').eq('id',u.user.id).single()
-  if(!p?.active||p.role!=='admin')return new Response(JSON.stringify({error:'admin_only'}),{status:403,headers:cors})
+  if(!p?.active||!['owner','admin'].includes(p.role))return new Response(JSON.stringify({error:'admin_only'}),{status:403,headers:cors})
   const {data:id,error}=await admin.rpc('create_daily_snapshot',{p_date:null});if(error)throw error
   const {data:snap,error:e}=await admin.from('backup_snapshots').select('*').eq('id',id).single();if(e)throw e
   return new Response(JSON.stringify(snap.snapshot),{status:200,headers:{...cors,'Content-Disposition':`attachment; filename="dropoff-backup-${snap.snapshot_date}.json"`}})
