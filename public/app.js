@@ -32,7 +32,8 @@ let managementTimer = null
 let attendanceCaptainId = null
 
 const roleLabels = {
-  admin:'الإدارة', accountant:'المحاسب', warehouse:'المخزن', pickup_captain:'كابتن جلب',
+  owner:'المالك', admin:'الإدارة', manager:'مدير تشغيل', accountant:'المحاسب', warehouse:'المخزن',
+  support:'الدعم', dispatcher:'الموزّع', pickup_captain:'كابتن جلب',
   delivery_captain:'كابتن توصيل', store_owner:'صاحب محل'
 }
 const statusLabels = {
@@ -75,8 +76,8 @@ function portal(){
   return 'admin'
 }
 const portalMeta = {
-  admin:{title:'لوحة الإدارة',roles:['admin']},
-  management:{title:'رابط الإدارة المالية',roles:['admin','accountant']},
+  admin:{title:'لوحة الإدارة',roles:['owner','admin','manager','warehouse','support','dispatcher']},
+  management:{title:'رابط الإدارة المالية',roles:['owner','admin','accountant']},
   captain:{title:'بوابة الكباتن',roles:['pickup_captain','delivery_captain']},
   store:{title:'بوابة المحلات',roles:['store_owner']}
 }
@@ -177,7 +178,7 @@ function renderAuth(){
 }
 
 async function loadCommon(){
-  if(profile?.role==='admin'||profile?.role==='accountant'){
+  if(['owner','admin','manager','accountant','warehouse','support','dispatcher'].includes(profile?.role)){
     const [{data:s},{data:p},{data:c}] = await Promise.all([
       supabase.from('stores').select('*').order('name'),
       supabase.from('profiles').select('*').order('created_at',{ascending:false}),
@@ -197,11 +198,15 @@ function defaultTab(){
   return 'home'
 }
 function navItems(){
-  if(portal()==='management')return profile.role==='admin'?[['accounts','💰 الجرد والحسابات'],['admin_link','↗ إدارة الأوردرات']]:[['accounts','💰 الجرد والحسابات']]
-  if(profile.role==='admin')return [
+  if(portal()==='management')return ['owner','admin'].includes(profile.role)?[['accounts','💰 الجرد والحسابات'],['admin_link','↗ إدارة الأوردرات']]:[['accounts','💰 الجرد والحسابات']]
+  if(['owner','admin'].includes(profile.role))return [
     ['home','⌂ الرئيسية'],['control','⚡ مركز العمليات'],['stickers','🏷️ طباعة الملصقات'],['add','＋ إضافة أوردرات'],['orders','▦ الأوردرات'],
     ['assign','⇄ التوزيع'],['operations','📦 العمليات'],['stores','🏪 المحلات'],['users','👥 الحسابات'],['management_link','💰 رابط الإدارة المالية']
   ]
+  if(profile.role==='manager')return [['home','⌂ الرئيسية'],['stickers','🏷️ الملصقات'],['add','＋ إضافة أوردرات'],['orders','▦ الأوردرات'],['assign','⇄ التوزيع'],['operations','📦 العمليات'],['stores','🏪 المحلات']]
+  if(profile.role==='warehouse')return [['home','⌂ الرئيسية'],['stickers','🏷️ الملصقات'],['orders','▦ الأوردرات'],['operations','📦 العمليات']]
+  if(profile.role==='dispatcher')return [['home','⌂ الرئيسية'],['orders','▦ الأوردرات'],['assign','⇄ التوزيع'],['operations','📦 العمليات']]
+  if(profile.role==='support')return [['home','⌂ الرئيسية'],['orders','▦ الأوردرات'],['stores','🏪 المحلات']]
   if(profile.role==='store_owner')return [['store_new','＋ إضافة أوردر'],['owner','▦ طلباتي وحسابي']]
   return [['captain','▦ أوردراتي']]
 }
@@ -220,7 +225,7 @@ function renderShell(){
   menu.onclick=()=>{const open=nav.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'إغلاق القائمة':'فتح القائمة');document.body.classList.toggle('menu-open',open)}
   qs('#logout').onclick=qs('#mobileLogout').onclick=()=>{stopCaptainLocation();supabase.auth.signOut({scope:'local'})}
   qs('#refresh').onclick=()=>openTab(currentTab,true)
-  if(profile.role==='admin')attachGlobalSearch(opsContext(),qs('.topbar .actions'))
+  if(['owner','admin','manager','warehouse','support','dispatcher'].includes(profile.role))attachGlobalSearch(opsContext(),qs('.topbar .actions'))
 }
 function opsContext(){
   return {
@@ -1306,7 +1311,7 @@ async function renderUsers(){
   qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>إنشاء حساب جديد</h3><span class="muted">من الإدارة فقط</span></div>
     <form id="userForm" class="form-grid two">
       <div class="field"><label>الاسم الكامل</label><input id="uName" required></div>
-      <div class="field"><label>نوع الحساب</label><select id="uRole"><option value="delivery_captain">كابتن توصيل</option><option value="pickup_captain">كابتن جلب</option><option value="store_owner">صاحب محل</option><option value="accountant">محاسب</option></select></div>
+      <div class="field"><label>نوع الحساب</label><select id="uRole"><option value="delivery_captain">كابتن توصيل</option><option value="pickup_captain">كابتن جلب</option><option value="store_owner">صاحب محل</option><option value="manager">مدير تشغيل</option><option value="warehouse">موظف مخزن</option><option value="dispatcher">موزّع طلبات</option><option value="support">دعم ومتابعة</option><option value="accountant">محاسب</option></select></div>
       <div class="field"><label>طريقة الدخول</label><select id="uType"><option value="phone">رقم هاتف</option><option value="username">اسم مستخدم</option></select></div>
       <div class="field"><label id="uLoginLabel">رقم الهاتف</label><input id="uLogin" required placeholder="0791234567"></div>
       <div class="field"><label>كلمة السر</label><input id="uPassword" type="password" minlength="6" required></div>
