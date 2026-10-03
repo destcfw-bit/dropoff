@@ -935,6 +935,39 @@ async function loadOrders(){
   qsa('.edit-order').forEach(b=>b.onclick=()=>editOrder(data.find(x=>x.id===b.dataset.id)))
 }
 
+async function renderOrderAttachments(orderId,host,canUpload=true){
+  if(!host)return
+  const load=async()=>{
+    const {data,error}=await supabase.from('order_attachments').select('*').eq('order_id',orderId).order('created_at',{ascending:false})
+    if(error){host.innerHTML=`<div class="empty">${esc(errText(error))}</div>`;return}
+    host.innerHTML=`${canUpload?`<div class="form-grid two"><div class="field"><label>نوع المرفق</label><select id="attCategory"><option value="paper">ورقة الطلب</option><option value="invoice">فاتورة</option><option value="product">صورة منتج</option><option value="proof">إثبات</option><option value="other">أخرى</option></select></div><div class="field"><label>الملف</label><input id="attFile" type="file" accept="image/jpeg,image/png,image/webp,application/pdf"></div><div class="field"><label>&nbsp;</label><button id="uploadAttachment" class="btn btn-blue" type="button">رفع المرفق</button></div></div>`:''}<div class="ops-attachment-list">${(data||[]).map(a=>`<div class="ops-attachment"><div><strong>${esc(a.file_name)}</strong><small style="display:block;color:var(--muted)">${esc(a.category)} · ${new Date(a.created_at).toLocaleString('ar-JO')}</small></div><div class="ops-actions"><button class="btn btn-sm btn-ghost view-attachment" data-id="${a.id}">فتح</button>${canUpload?`<button class="btn btn-sm btn-red delete-attachment" data-id="${a.id}">حذف</button>`:''}</div></div>`).join('')||'<div class="empty">لا توجد مرفقات</div>'}</div>`
+    qsa('.view-attachment',host).forEach(b=>b.onclick=async()=>{
+      const a=(data||[]).find(x=>x.id===b.dataset.id);if(!a)return
+      const {data:signed,error:e}=await supabase.storage.from('order-attachments').createSignedUrl(a.storage_path,300)
+      if(e)return toast(errText(e),'error')
+      window.open(signed.signedUrl,'_blank','noopener')
+    })
+    qsa('.delete-attachment',host).forEach(b=>b.onclick=async()=>{
+      const a=(data||[]).find(x=>x.id===b.dataset.id);if(!a||!confirm('حذف المرفق؟'))return
+      await supabase.storage.from('order-attachments').remove([a.storage_path])
+      const {error:e}=await supabase.from('order_attachments').delete().eq('id',a.id)
+      if(e)return toast(errText(e),'error');toast('تم حذف المرفق');load()
+    })
+    if(canUpload&&qs('#uploadAttachment',host))qs('#uploadAttachment',host).onclick=async()=>{
+      const file=qs('#attFile',host).files?.[0];if(!file)return toast('اختر ملف','error')
+      if(file.size>10*1024*1024)return toast('الحد الأقصى للمرفق 10MB','error')
+      const safe=String(file.name||'file').replace(/[^a-zA-Z0-9._-]/g,'_')
+      const path=`${orderId}/${Date.now()}-${safe}`
+      const up=await supabase.storage.from('order-attachments').upload(path,file,{contentType:file.type||'application/octet-stream',upsert:false})
+      if(up.error)return toast(errText(up.error),'error')
+      const ins=await supabase.from('order_attachments').insert({order_id:orderId,storage_path:path,file_name:file.name,mime_type:file.type||null,size_bytes:file.size,category:qs('#attCategory',host).value,uploaded_by:profile.id})
+      if(ins.error){await supabase.storage.from('order-attachments').remove([path]);return toast(errText(ins.error),'error')}
+      toast('تم رفع المرفق');load()
+    }
+  }
+  await load()
+}
+
 async function editOrder(o){
   const {data:events}=await supabase.from('order_events').select('event_type,old_status,new_status,created_at,actor_id,meta').eq('order_id',o.id).order('created_at',{ascending:false}).limit(30)
   qs('#content').innerHTML=`<div class="panel"><div class="panel-head"><h3>${esc(o.order_code)} · ${esc(storeName(o.store_id))}</h3><button id="backOrders" class="btn btn-ghost">رجوع</button></div>
@@ -951,9 +984,11 @@ async function editOrder(o){
       <div class="field"><label>كابتن التوصيل</label><select id="eoCaptain"><option value="">بدون</option>${captains.filter(c=>c.active&&['delivery','both'].includes(c.captain_type)).map(c=>`<option value="${c.id}">${esc(c.profiles?.full_name||c.id)}</option>`).join('')}</select></div>
       <div class="field"><label>&nbsp;</label><button class="btn btn-primary">حفظ التعديلات</button></div>
     </form>${o.status==='returned_warehouse'?`<div class="quick"><button id="returnToStore" class="btn btn-red">تسليم المرتجع للمحل</button><button id="retryDelivery" class="btn btn-blue">إعادة محاولة التوصيل</button></div>`:''}</div>
-    <div class="panel" style="margin-top:14px"><h3>سجل التعديلات</h3><div class="cards">${(events||[]).map(e=>`<div class="card"><b>${esc(e.event_type)}</b><p>${esc(statusLabels[e.old_status]||e.old_status||'—')} ← ${esc(statusLabels[e.new_status]||e.new_status||'—')}</p>${e.meta?.old_amount!==undefined&&Number(e.meta.old_amount)!==Number(e.meta.new_amount)?`<p>المبلغ: ${money(e.meta.old_amount)} ← ${money(e.meta.new_amount)}</p>`:''}${e.meta?.old_captain!==undefined&&e.meta.old_captain!==e.meta.new_captain?`<p>الكابتن: ${esc(captainName(e.meta.old_captain))} ← ${esc(captainName(e.meta.new_captain))}</p>`:''}<small>${new Date(e.created_at).toLocaleString('ar-JO')} · ${esc(profiles.find(p=>p.id===e.actor_id)?.full_name||'النظام')}</small></div>`).join('')||'<div class="empty">لا يوجد تعديلات</div>'}</div></div>`
+    <div class="panel" style="margin-top:14px"><h3>سجل التعديلات</h3><div class="cards">${(events||[]).map(e=>`<div class="card"><b>${esc(e.event_type)}</b><p>${esc(statusLabels[e.old_status]||e.old_status||'—')} ← ${esc(statusLabels[e.new_status]||e.new_status||'—')}</p>${e.meta?.old_amount!==undefined&&Number(e.meta.old_amount)!==Number(e.meta.new_amount)?`<p>المبلغ: ${money(e.meta.old_amount)} ← ${money(e.meta.new_amount)}</p>`:''}${e.meta?.old_captain!==undefined&&e.meta.old_captain!==e.meta.new_captain?`<p>الكابتن: ${esc(captainName(e.meta.old_captain))} ← ${esc(captainName(e.meta.new_captain))}</p>`:''}<small>${new Date(e.created_at).toLocaleString('ar-JO')} · ${esc(profiles.find(p=>p.id===e.actor_id)?.full_name||'النظام')}</small></div>`).join('')||'<div class="empty">لا يوجد تعديلات</div>'}</div></div>
+    <div class="panel" style="margin-top:14px"><div class="panel-head"><h3>📎 مرفقات الأوردر</h3><span class="muted">صور الورقة / فواتير / إثباتات</span></div><div id="orderAttachmentsPanel"></div></div>`
   qs('#eoPayment').value=o.payment_type||'cod';qs('#eoPriority').value=o.priority||'normal';qs('#eoRun').value=o.delivery_run||'evening';qs('#eoCaptain').value=o.delivery_captain_id||''
   qs('#backOrders').onclick=renderOrders
+  renderOrderAttachments(o.id,qs('#orderAttachmentsPanel'),true)
   if(o.status==='returned_warehouse'){
     qs('#returnToStore').onclick=async()=>{const {error}=await supabase.from('orders').update({status:'returned_store',returned_at:new Date().toISOString()}).eq('id',o.id);if(error)return toast(errText(error),'error');toast('تم تسليم المرتجع للمحل');renderOrders()}
     qs('#retryDelivery').onclick=async()=>{const {error}=await supabase.from('orders').update({status:'in_warehouse',delivery_captain_id:null,assigned_at:null}).eq('id',o.id);if(error)return toast(errText(error),'error');toast('الطلب جاهز لإعادة التوزيع');renderAssign()}
@@ -1745,8 +1780,9 @@ async function renderOwner(){
     const o=orders.find(x=>x.id===b.dataset.id)
     if(!o)return
     const qr=await QRCode.toDataURL(o.order_code,{width:180,margin:1})
-    qs('#storeOrderDetails').innerHTML=`<div class="created-order"><div><span class="badge ${statusClass(o.status)}">${esc(statusLabels[o.status]||o.status)}</span><h3>${esc(o.order_code)} · ${esc(storeName(o.store_id))}</h3><p>${esc(o.customer_name)} · ${esc(o.customer_phone)}</p><p>${esc(o.area)} · ${esc(o.address)}</p><p>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)} · ${esc(o.parcel_count||1)} قطعة</p><p>${esc(o.notes||'')}</p><button id="copyStoreOrder" class="btn btn-sm btn-blue">نسخ بيانات الأوردر لطلب جديد</button></div><img src="${qr}" alt="QR للطلب ${esc(o.order_code)}"></div>`
+    qs('#storeOrderDetails').innerHTML=`<div class="created-order"><div><span class="badge ${statusClass(o.status)}">${esc(statusLabels[o.status]||o.status)}</span><h3>${esc(o.order_code)} · ${esc(storeName(o.store_id))}</h3><p>${esc(o.customer_name)} · ${esc(o.customer_phone)}</p><p>${esc(o.area)} · ${esc(o.address)}</p><p>${o.payment_type==='prepaid'?'مدفوع مسبقاً':money(o.amount_to_collect)} · ${esc(o.parcel_count||1)} قطعة</p><p>${esc(o.notes||'')}</p><button id="copyStoreOrder" class="btn btn-sm btn-blue">نسخ بيانات الأوردر لطلب جديد</button></div><img src="${qr}" alt="QR للطلب ${esc(o.order_code)}"></div><div class="panel" style="margin-top:10px"><div class="panel-head"><h3>📎 مرفقات الطلب</h3></div><div id="storeAttachmentsPanel"></div></div>`
     qs('#copyStoreOrder').onclick=()=>{pendingStoreCopy=o;openTab('store_new')}
+    renderOrderAttachments(o.id,qs('#storeAttachmentsPanel'),true)
     qs('#storeOrderDetails').scrollIntoView({behavior:'smooth',block:'nearest'})
   })
 }
