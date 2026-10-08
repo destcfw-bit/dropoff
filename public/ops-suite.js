@@ -88,9 +88,9 @@ async function renderOverview(ctx,body){
       ${kpi('مع الكباتن الآن',m.with_captains_now||0)}
       ${kpi('آخر نسخة منطقية',backup?.[0]?.snapshot_date||'لا يوجد')}
     </div>
-    <section class="ops-section ops-ai">
-      <div class="ops-section-head"><div><h3>🤖 ملخص اليوم الذكي</h3><p class="muted">يُحفظ مرة واحدة لليوم ويمكن تحديثه يدوياً.</p></div>${button('تحديث الملخص','btn btn-blue','id="refreshDailySummary"')}</div>
-      <div id="dailySummary"><div class="ops-empty">جاري تجهيز الملخص...</div></div>
+    <section class="ops-section">
+      <div class="ops-section-head"><div><h3>📊 ملخص اليوم</h3><p class="muted">ملخص مباشر من قاعدة البيانات بدون أي تكلفة AI.</p></div></div>
+      <div class="ops-summary">اليوم عندك <b>${m.created_today||0}</b> أوردر جديد، تم تسليم <b>${m.delivered_today||0}</b>، بالمخزن الآن <b>${m.in_warehouse_now||0}</b>، ومع الكباتن <b>${m.with_captains_now||0}</b>. التحصيلات اليوم <b>${money(m.collections_today||0)}</b> ورسوم التوصيل <b>${money(m.delivery_fees_today||0)}</b>.</div>
     </section>
     <section class="ops-section">
       <div class="ops-section-head"><div><h3>💵 عهدة الكباتن</h3><p class="muted">الكاش المحصّل، المسلم للمحاسب، والمتبقي على كل كابتن.</p></div><span class="ops-chip">${(cash||[]).filter(x=>Number(x.cash_due||0)>0).length} عليهم عهدة</span></div>
@@ -113,16 +113,6 @@ async function renderOverview(ctx,body){
   $('#openStickers',body).onclick=()=>ctx.openTab('stickers')
   $('#openAdd',body).onclick=()=>ctx.openTab('add')
   $('#openExceptions',body).onclick=()=>$$('[data-ops-tab]',ctx.content).find(x=>x.dataset.opsTab==='exceptions')?.click()
-  const loadSummary=async force=>{
-    const out=$('#dailySummary',body)
-    out.innerHTML='<div class="ops-empty">جاري تشغيل الذكاء الاصطناعي...</div>'
-    try{
-      const d=await edge(ctx,'daily-ops-summary',{force:Boolean(force)})
-      out.innerHTML=`<div class="ops-summary">${esc(d.summary?.summary||'لا يوجد ملخص')}</div><small class="muted">آخر تحديث: ${fmt(d.summary?.generated_at)}</small>`
-    }catch(e){renderError(out,e)}
-  }
-  $('#refreshDailySummary',body).onclick=()=>loadSummary(true)
-  loadSummary(false)
 }
 
 async function renderExceptions(ctx,body){
@@ -230,11 +220,8 @@ async function renderIntelligence(ctx,body){
     ctx.supabase.from('area_performance_30d').select('*').order('total_orders',{ascending:false}).limit(50)
   ])
   body.innerHTML=`
-    <section class="ops-section ops-ai">
-      <div class="ops-section-head"><div><h3>🤖 مساعد عمليات Drop Off</h3><p class="muted">اسأله عن التشغيل والأرقام والاستثناءات؛ لا ينفذ تغييرات على البيانات.</p></div></div>
-      <textarea id="opsQuestion" class="ops-textarea" placeholder="مثال: شو أهم المشاكل اليوم؟ مين عليه كاش؟ وين أكثر مناطق عندنا؟"></textarea>
-      <div class="ops-actions" style="margin-top:8px">${button('اسأل المساعد','btn btn-primary','id="askOps"')}</div>
-      <div id="opsAnswer"></div>
+    <section class="ops-section">
+      <div class="ops-section-head"><div><h3>🤖 AI للتشغيل</h3><p class="muted">موقوف لتقليل التكلفة. الـAI الوحيد المفعّل حالياً هو تصوير ورقة الأوردر وتحويلها لبيانات.</p></div><span class="ops-chip warn">موقوف</span></div>
     </section>
     <section class="ops-section"><div class="ops-section-head"><h3>🏪 مؤشرات المحلات</h3></div><div class="ops-table-scroll"><table class="ops-metric-table"><thead><tr><th>المحل</th><th>30 يوم</th><th>تسليم</th><th>مشاكل</th><th>نسبة التسليم</th><th>مؤشر تشغيلي</th></tr></thead><tbody>
       ${(stores.data||[]).map(x=>`<tr><td>${esc(x.name)}</td><td>${x.orders_30d}</td><td>${x.delivered_30d}</td><td>${x.problem_30d}</td><td>${pct(x.delivery_rate)}</td><td><div class="ops-meter"><i style="width:${Math.max(0,Math.min(100,Number(x.operational_index||0)))}%"></i></div> ${x.operational_index}</td></tr>`).join('')}
@@ -245,11 +232,6 @@ async function renderIntelligence(ctx,body){
     <section class="ops-section"><div class="ops-section-head"><h3>🔥 Heatmap المناطق — 30 يوم</h3></div><div class="ops-list">
       ${(areas.data||[]).map(x=>`<div class="ops-list-row"><div><strong>${esc(x.area)}</strong><small>${x.total_orders} طلب · ${x.delivered_orders} تسليم · ${x.problem_orders} مشاكل · متوسط ${x.avg_delivery_hours||0} ساعة</small></div><span class="ops-chip">${money(x.fees_earned)}</span></div>`).join('')||'<div class="ops-empty">لا توجد بيانات كافية.</div>'}
     </div></section>`
-  $('#askOps',body).onclick=async()=>{
-    const q=$('#opsQuestion',body).value.trim(),out=$('#opsAnswer',body);if(!q)return
-    out.innerHTML='<div class="ops-empty">جاري تحليل بيانات التشغيل...</div>'
-    try{const d=await edge(ctx,'ops-assistant',{question:q});out.innerHTML=`<div class="ops-ai-answer">${esc(d.answer||'')}</div>`}catch(e){renderError(out,e)}
-  }
 }
 
 async function renderIntegrations(ctx,body){
