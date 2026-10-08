@@ -12,6 +12,8 @@ Deno.serve(async req=>{
   const {data:u}=await admin.auth.getUser(token); if(!u?.user)return reply({error:'unauthorized'},401)
   const {data:p}=await admin.from('profiles').select('role,active').eq('id',u.user.id).single()
   if(!p?.active||!['owner','admin','accountant'].includes(p.role))return reply({error:'not_allowed'},403)
+  const {data:flag}=await admin.from('feature_flags').select('enabled').eq('key','ai_assistant').is('store_id',null).maybeSingle()
+  if(flag?.enabled!==true)return reply({error:'feature_disabled'},403)
   if(!openai)return reply({error:'ai_not_configured'},503)
   const body=await req.json(),question=String(body.question||'').trim().slice(0,1500)
   if(question.length<2)return reply({error:'question_required'},400)
