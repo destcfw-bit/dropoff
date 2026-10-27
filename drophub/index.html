@@ -210,6 +210,31 @@
       .cta-panel { padding:28px; }
       .footer { flex-direction:column; text-align:center; }
     }
+  
+    /* UI UX Pro Max refinement: keyboard, mobile and performance */
+    :focus-visible { outline: 3px solid var(--cyan); outline-offset: 4px; }
+    a, button { -webkit-tap-highlight-color: transparent; }
+    .btn, .menu, .company-card { will-change: auto; }
+    .btn:focus-visible, .menu:focus-visible { box-shadow: 0 0 0 5px rgba(74,255,219,.18); }
+    .company-card { isolation:isolate; }
+    .company-card:focus-within { border-color: var(--green); }
+    .nav a { display:inline-flex; align-items:center; min-height:44px; }
+    .menu { cursor:pointer; min-width:44px; min-height:44px; }
+    @media (max-width:760px) {
+      .nav { box-shadow: 0 22px 50px rgba(0,0,0,.45); }
+      .hero { gap:16px; }
+      .hero-visual { overflow:hidden; }
+      .hero-copy h1 { font-size:clamp(38px,11vw,54px); overflow-wrap:break-word; }
+      .section { padding-block:64px; }
+      .company-card { min-height:320px; }
+      .btn { min-height:48px; }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      html { scroll-behavior:auto; }
+      *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+      [data-reveal] { opacity:1; transform:none; }
+    }
+
   </style>
 </head>
 <body>
@@ -368,8 +393,23 @@
   <script>
     const nav = document.getElementById('nav');
     const menu = document.getElementById('menu');
-    menu?.addEventListener('click', () => nav.classList.toggle('open'));
-    document.querySelectorAll('.nav a').forEach(a => a.addEventListener('click', () => nav.classList.remove('open')));
+    menu?.setAttribute('aria-controls', 'nav');
+    menu?.setAttribute('aria-expanded', 'false');
+    menu?.setAttribute('aria-label', 'فتح وإغلاق القائمة');
+    menu?.addEventListener('click', () => {
+      const isOpen = nav.classList.toggle('open');
+      menu.setAttribute('aria-expanded', String(isOpen));
+    });
+    document.querySelectorAll('.nav a').forEach(a => a.addEventListener('click', () => {
+      nav.classList.remove('open');
+      menu?.setAttribute('aria-expanded', 'false');
+    }));
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        nav?.classList.remove('open');
+        menu?.setAttribute('aria-expanded', 'false');
+      }
+    });
     document.getElementById('year').textContent = new Date().getFullYear();
 
     const copyMail = document.getElementById('copyMail');
@@ -386,16 +426,17 @@
     });
 
     // reveal on scroll
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) entry.target.classList.add('visible');
       });
     }, { threshold:.12 });
-    document.querySelectorAll('[data-reveal]').forEach(el => observer.observe(el));
+    document.querySelectorAll('[data-reveal]').forEach(el => reduceMotion ? el.classList.add('visible') : observer.observe(el));
 
     // 3D tilt effect
     const tiltEls = document.querySelectorAll('.tilt-card');
-    tiltEls.forEach(card => {
+    if (!reduceMotion) tiltEls.forEach(card => {
       card.addEventListener('mousemove', (e) => {
         const r = card.getBoundingClientRect();
         const px = (e.clientX - r.left) / r.width;
@@ -412,7 +453,7 @@
     // parallax on hero visual
     const visual = document.querySelector('.hero-visual');
     const core = document.querySelector('.hub-core');
-    if (visual && core) {
+    if (visual && core && !reduceMotion) {
       visual.addEventListener('mousemove', (e) => {
         const r = visual.getBoundingClientRect();
         const x = (e.clientX - r.left) / r.width - .5;
